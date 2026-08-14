@@ -118,8 +118,9 @@ regardless of the desktop embed setting.
 itch.io serves games from a sandboxed iframe on a separate origin, so the manifest and
 service worker are ignored there — the game runs fine, it just is not installable from
 an itch.io page. For an installable, offline-capable copy, host the files anywhere with
-HTTPS. The included workflow deploys to GitHub Pages on every push to `main`; enable it
-under **Settings → Pages → Source: GitHub Actions**.
+HTTPS. The included workflow deploys to GitHub Pages on every push to `main` and enables
+Pages itself on first run, so no manual setup is needed. Note that Pages on a *private*
+repository requires a paid plan; on a public repository it is free.
 
 From that URL:
 

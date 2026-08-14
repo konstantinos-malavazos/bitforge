@@ -43,7 +43,12 @@ jobs:
           cp index.html manifest.webmanifest sw.js _site/
           cp -r icons _site/
 
+      # enablement creates the Pages site via the API on first run, so the
+      # deploy does not depend on someone flipping Settings → Pages by hand.
+      # Requires a public repo or a paid plan; it is a no-op once Pages exists.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
