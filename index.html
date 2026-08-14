@@ -137,13 +137,6 @@
   #msg.win{ color:var(--gold); font-weight:700; }
   #msg.nudge{ color:var(--accent); }
 
-  .dpad{
-    display:grid; grid-template-columns:repeat(3, clamp(46px, 14vmin, 58px));
-    grid-template-rows:repeat(2, clamp(40px, 11vmin, 52px)); gap:5px; flex:0 0 auto;
-  }
-  .dpad button{ padding:0; font-size:17px; }
-  .up{ grid-area:1/2; } .left{ grid-area:2/1; } .down{ grid-area:2/2; } .right{ grid-area:2/3; }
-
   .legend{ font-size:12px; color:var(--dim); text-align:center; max-width:480px; line-height:1.5; }
   .legend b{ color:var(--accent); }
 
@@ -169,7 +162,6 @@
     .bar   { grid-column:2; grid-row:2; grid-template-columns:repeat(2, minmax(0,1fr)); }
     #prompt{ grid-column:2; grid-row:3; font-size:12px; padding:6px 10px; }
     #msg   { grid-column:2; grid-row:4; align-self:start; }
-    .dpad  { grid-column:2; grid-row:4; align-self:end; justify-self:center; }
     .stat{ padding:3px 4px; }
     .stat .k{ font-size:8px; letter-spacing:1px; }
     .legend{ display:none; }
@@ -228,13 +220,6 @@
 
   <div id="stage"><div id="board"></div></div>
   <div id="msg" role="status" aria-live="polite"></div>
-
-  <div class="dpad" role="group" aria-label="Move tiles">
-    <button class="up" data-dir="up" aria-label="Move up">▲</button>
-    <button class="left" data-dir="left" aria-label="Move left">◀</button>
-    <button class="down" data-dir="down" aria-label="Move down">▼</button>
-    <button class="right" data-dir="right" aria-label="Move right">▶</button>
-  </div>
 
   <div class="legend" id="legend"></div>
 
@@ -756,10 +741,6 @@ document.addEventListener('keydown', e => {
   // Normalize so Shift/Caps Lock don't break WASD.
   const dir = map[e.key.length === 1 ? e.key.toLowerCase() : e.key];
   if(dir){ e.preventDefault(); move(dir); }
-});
-
-document.querySelectorAll('.dpad button').forEach(b => {
-  b.addEventListener('click', () => move(b.dataset.dir));
 });
 
 const SWIPE_MIN = 24;
