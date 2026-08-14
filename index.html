@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XOR-2048 · Binary Merge</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#121722; --cell:#1a2130; --text:#e6edf3;
+    --accent:#3fb6ff; --gold:#ffd166; --dim:#8b98ab; --good:#57d9a3;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0; min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:16px;
+    background:radial-gradient(1200px 700px at 50% -10%, #172032 0%, var(--bg) 60%);
+    color:var(--text); font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding:20px;
+  }
+  h1{ margin:0; font-size:22px; letter-spacing:1px; }
+  h1 span{ color:var(--accent); }
+  .bar{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:center; }
+  .stat{
+    background:var(--panel); border:1px solid #232b3d; border-radius:10px;
+    padding:8px 14px; min-width:104px; text-align:center;
+  }
+  .stat .k{ font-size:10px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; }
+  .stat .v{ font-size:20px; font-weight:700; }
+  #goal .v{ color:var(--gold); }
+  button{
+    background:var(--panel); color:var(--text); border:1px solid #2c3547;
+    border-radius:10px; padding:9px 16px; font:inherit; cursor:pointer; letter-spacing:1px;
+  }
+  button:hover{ border-color:var(--accent); }
+  button.ghost{ background:transparent; color:var(--dim); border-color:transparent; }
+  button.ghost:hover{ color:var(--text); border-color:transparent; }
+
+  #board{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:10px;
+    background:var(--panel); padding:10px; border-radius:14px; border:1px solid #232b3d;
+    width:min(92vw, 420px); aspect-ratio:1;
+  }
+  .cell{
+    background:var(--cell); border-radius:8px; position:relative;
+    display:flex; align-items:center; justify-content:center;
+    transition:box-shadow .15s;
+  }
+  .cell.hl{ box-shadow:0 0 0 3px var(--accent), 0 0 18px rgba(63,182,255,.5); }
+  .tile{
+    position:absolute; inset:4px; border-radius:6px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    animation:pop .12s ease-out; box-shadow:0 0 0 1px rgba(255,255,255,.05) inset;
+  }
+  .tile .bin{ font-size:clamp(10px, 2.6vw, 13px); letter-spacing:1px; opacity:.9; }
+  .tile .dec{ font-size:clamp(16px, 4.4vw, 22px); font-weight:700; line-height:1; margin-top:2px; }
+  .tile.dense{ color:#0b0e14; }
+  @keyframes pop{ from{ transform:scale(.6); opacity:0; } to{ transform:scale(1); opacity:1; } }
+
+  #prompt{
+    min-height:60px; width:min(92vw,420px); background:var(--panel);
+    border:1px solid #2c3547; border-left:3px solid var(--accent);
+    border-radius:10px; padding:12px 14px; font-size:14px; line-height:1.5;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  #prompt .step{ font-size:11px; letter-spacing:2px; color:var(--accent); text-transform:uppercase; }
+  #prompt.hidden{ display:none; }
+  #prompt .skip{ align-self:flex-end; font-size:12px; color:var(--dim); cursor:pointer; background:none; border:none; font:inherit; padding:0; }
+  #prompt .skip:hover{ color:var(--text); }
+
+  #msg{ min-height:20px; font-size:14px; color:var(--dim); text-align:center; }
+  #msg.win{ color:var(--gold); font-weight:700; }
+  #msg.hint{ color:var(--accent); }
+
+  .arrows{ display:grid; grid-template-columns:repeat(3,52px); grid-template-rows:repeat(3,52px); gap:6px; }
+  .arrows button{ padding:0; font-size:18px; }
+  .up{ grid-area:1/2; } .left{ grid-area:2/1; } .down{ grid-area:2/2; } .right{ grid-area:2/3; }
+
+  .hint{ font-size:12px; color:var(--dim); text-align:center; max-width:420px; line-height:1.6; }
+  .hint b{ color:var(--accent); }
+
+  /* modal */
+  #modal{
+    position:fixed; inset:0; background:rgba(5,8,14,.8); display:none;
+    align-items:center; justify-content:center; z-index:10; padding:20px;
+  }
+  #modal.open{ display:flex; }
+  .card{
+    background:var(--panel); border:1px solid #2c3547; border-radius:14px;
+    max-width:460px; width:100%; padding:22px; display:flex; flex-direction:column; gap:14px;
+    font-size:14px; line-height:1.6;
+  }
+  .card h2{ margin:0; font-size:17px; }
+  .card ul{ margin:0; padding-left:18px; }
+  .card li{ margin-bottom:8px; }
+  .card .mono{ color:var(--accent); }
+  .card .row{ display:flex; gap:10px; justify-content:flex-end; }
+</style>
+</head>
+<body>
+  <h1>XOR<span>-2048</span></h1>
+
+  <div class="bar">
+    <div class="stat"><div class="k">Score</div><div class="v" id="score">0</div></div>
+    <div class="stat" id="goal"><div class="k">Goal</div><div class="v">11111111</div></div>
+    <div class="stat"><div class="k">Moves</div><div class="v" id="moves">0</div></div>
+    <button id="newgame">New Game</button>
+    <button class="ghost" id="help">How to play</button>
+  </div>
+
+  <div id="prompt" class="hidden">
+    <div class="step" id="prompt-step"></div>
+    <div id="prompt-text"></div>
+    <button class="skip" id="skip">skip tutorial →</button>
+  </div>
+
+  <div id="board"></div>
+  <div id="msg"></div>
+
+  <div class="arrows" role="group" aria-label="Move tiles">
+    <button class="up" data-dir="up" aria-label="Move up">▲</button>
+    <button class="left" data-dir="left" aria-label="Move left">◀</button>
+    <button class="down" data-dir="down" aria-label="Move down">▼</button>
+    <button class="right" data-dir="right" aria-label="Move right">▶</button>
+  </div>
+
+  <div class="hint">
+    Swipe or use <b>arrow keys / WASD</b>. Colliding tiles <b>XOR</b>: equal bits cancel,
+    different bits combine. Equal tiles vanish to <b>0</b>. Forge <b>11111111</b> (255).
+  </div>
+
+  <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
+    <div class="card">
+      <h2 id="modal-title">How to play</h2>
+      <ul>
+        <li>Every tile is an <span class="mono">8-bit number</span> (shown as binary + decimal).</li>
+        <li>Swiping slides tiles; when two collide they <span class="mono">XOR</span>:
+          <br><span class="mono">0010 ^ 0100 = 0110</span> — different bits combine.</li>
+        <li>Equal tiles cancel: <span class="mono">0011 ^ 0011 = 0000</span> — your "delete" tool.</li>
+        <li>Overlapping bits are lost: <span class="mono">0011 ^ 0101 = 0110</span> — wasted potential.</li>
+        <li>Goal: forge the full register <span class="mono">11111111 = 255</span>.</li>
+        <li>Score = total bits set on merges. No lose state — it's a puzzle, take your time.</li>
+      </ul>
+      <div class="row">
+        <button class="ghost" id="replay">Replay tutorial</button>
+        <button id="close">Got it</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SIZE = 4;
+let grid, score, moves, won, over;
+let tutorial = { active: false, step: 0 };
+
+const TUTORIAL = [
+  {
+    title: 'Step 1 of 4 · XOR merge',
+    text: 'Tiles are binary. When two collide, they XOR. Swipe <b>LEFT</b> to merge 0010 and 0100 into 0110.',
+    dir: 'left',
+    board: [[2,4,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g[0][0] === 6
+  },
+  {
+    title: 'Step 2 of 4 · Equal tiles cancel',
+    text: 'Equal tiles XOR to 0 and vanish — your cleanup tool. Swipe <b>LEFT</b> to clear these two.',
+    dir: 'left',
+    board: [[3,3,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g[0][0] === 0 && g[0][1] === 0
+  },
+  {
+    title: 'Step 3 of 4 · Overlapping bits are lost',
+    text: 'Shared bits cancel: 0011 ^ 0101 = 0110 — two 2-bit tiles collapse to one. Swipe <b>LEFT</b>.',
+    dir: 'left',
+    board: [[3,5,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g[0][0] === 6
+  },
+  {
+    title: 'Step 4 of 4 · Forge the register',
+    text: 'Final: 11111110 ^ 00000001 = 11111111. Swipe <b>LEFT</b> to win.',
+    dir: 'left',
+    board: [[254,1,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g.flat().includes(255)
+  }
+];
+
+const DIR_NAME = { left:'left', right:'right', up:'up', down:'down' };
+
+function popcount(n){ let c=0; while(n){ c += n&1; n >>= 1; } return c; }
+
+function randomTile(){
+  const r = Math.random();
+  let k;
+  if(r < .40) k = 0;
+  else if(r < .60) k = 1;
+  else if(r < .75) k = 2;
+  else if(r < .85) k = 3;
+  else if(r < .92) k = 4;
+  else if(r < .96) k = 5;
+  else if(r < .985) k = 6;
+  else k = 7;
+  return 1 << k;
+}
+
+function emptyCells(){
+  const e = [];
+  for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) if(grid[r][c]===0) e.push([r,c]);
+  return e;
+}
+
+function spawn(){
+  const e = emptyCells();
+  if(!e.length) return false;
+  const [r,c] = e[Math.floor(Math.random()*e.length)];
+  grid[r][c] = randomTile();
+  return true;
+}
+
+function getLines(dir){
+  const lines = [];
+  for(let i=0;i<SIZE;i++){
+    const line = [];
+    for(let j=0;j<SIZE;j++){
+      let r,c;
+      if(dir==='left'){ r=i; c=j; }
+      else if(dir==='right'){ r=i; c=SIZE-1-j; }
+      else if(dir==='up'){ r=j; c=i; }
+      else { r=SIZE-1-j; c=i; }
+      line.push(grid[r][c]);
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+function setLines(dir, lines){
+  for(let i=0;i<SIZE;i++){
+    for(let j=0;j<SIZE;j++){
+      let r,c;
+      if(dir==='left'){ r=i; c=j; }
+      else if(dir==='right'){ r=i; c=SIZE-1-j; }
+      else if(dir==='up'){ r=j; c=i; }
+      else { r=SIZE-1-j; c=i; }
+      grid[r][c] = lines[i][j];
+    }
+  }
+}
+
+function mergeLine(line){
+  const tiles = line.filter(v => v !== 0);
+  const out = [];
+  let gained = 0;
+  let i = 0;
+  while(i < tiles.length){
+    if(i + 1 < tiles.length){
+      const m = tiles[i] ^ tiles[i+1];
+      if(m === 0){ i += 2; }
+      else { out.push(m); gained += popcount(m); i += 2; }
+    } else {
+      out.push(tiles[i]); i += 1;
+    }
+  }
+  while(out.length < SIZE) out.push(0);
+  return { out, gained };
+}
+
+function move(dir){
+  if(tutorial.active){
+    const step = TUTORIAL[tutorial.step];
+    if(dir !== step.dir){
+      const m = document.getElementById('msg');
+      m.textContent = 'Try swiping ' + DIR_NAME[step.dir].toUpperCase() + '.';
+      m.className = 'hint';
+      return;
+    }
+    const before = grid.flat().join(',');
+    setLines(dir, getLines(dir).map(l => mergeLine(l).out));
+    if(grid.flat().join(',') === before) return;
+    render();
+    if(step.check(grid)) advanceTutorial();
+    return;
+  }
+
+  if(over && !won) return;
+  const before = grid.flat().join(',');
+  let gained = 0;
+  const next = getLines(dir).map(l => { const r = mergeLine(l); gained += r.gained; return r.out; });
+  setLines(dir, next);
+  if(grid.flat().join(',') === before) return;
+  score += gained;
+  moves++;
+  spawn();
+  render();
+  checkWin();
+  checkOver();
+}
+
+function advanceTutorial(){
+  tutorial.step++;
+  if(tutorial.step >= TUTORIAL.length){
+    tutorial.active = false;
+    document.getElementById('prompt').classList.add('hidden');
+    // startNormalGame() clears #msg, so set the completion text after it runs.
+    startNormalGame();
+    const m = document.getElementById('msg');
+    m.textContent = 'Tutorial complete! Now forge 255 for real. 🎯';
+    m.className = 'win';
+  } else {
+    loadTutorialStep(tutorial.step);
+    render();
+  }
+}
+
+function loadTutorialStep(i){
+  const s = TUTORIAL[i];
+  grid = s.board.map(r => r.slice());
+  document.getElementById('prompt').classList.remove('hidden');
+  document.getElementById('prompt-step').textContent = s.title;
+  document.getElementById('prompt-text').innerHTML = s.text;
+  const m = document.getElementById('msg');
+  m.textContent = ''; m.className = '';
+}
+
+function startTutorial(){
+  tutorial = { active: true, step: 0 };
+  won = false; over = false; score = 0; moves = 0;
+  loadTutorialStep(0);
+  render();
+}
+
+function startNormalGame(){
+  grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
+  score = 0; moves = 0; won = false; over = false;
+  tutorial.active = false;
+  document.getElementById('prompt').classList.add('hidden');
+  const m = document.getElementById('msg');
+  m.textContent = ''; m.className = '';
+  spawn(); spawn();
+  render();
+}
+
+function colorFor(v){
+  const pc = popcount(v);
+  if(v === 255) return '#ffd166';
+  const hues = [0, 210, 195, 175, 150, 120, 90, 60, 40];
+  const hue = hues[Math.min(pc, hues.length-1)];
+  return `hsl(${hue}, 60%, ${50 + pc*3}%)`;
+}
+
+function render(){
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  const hlSet = tutorial.active ? new Set(TUTORIAL[tutorial.step].hl.map(p => p[0]+','+p[1])) : null;
+  for(let r=0;r<SIZE;r++){
+    for(let c=0;c<SIZE;c++){
+      const cell = document.createElement('div');
+      cell.className = 'cell' + (hlSet && hlSet.has(r+','+c) ? ' hl' : '');
+      const v = grid[r][c];
+      if(v !== 0){
+        const t = document.createElement('div');
+        t.className = 'tile' + (popcount(v) >= 5 ? ' dense' : '');
+        t.style.background = colorFor(v);
+        t.innerHTML = `<span class="bin">${v.toString(2).padStart(8,'0')}</span>` +
+                      `<span class="dec">${v}</span>`;
+        cell.appendChild(t);
+      }
+      board.appendChild(cell);
+    }
+  }
+  document.getElementById('score').textContent = score;
+  document.getElementById('moves').textContent = moves;
+}
+
+function checkWin(){
+  if(won) return;
+  if(grid.flat().some(v => v === 255)){
+    won = true;
+    const m = document.getElementById('msg');
+    m.textContent = '🎉 11111111 forged. Keep going?';
+    m.className = 'win';
+  }
+}
+
+function checkOver(){
+  if(won) return;
+  if(emptyCells().length === 0){
+    over = true;
+    const m = document.getElementById('msg');
+    m.textContent = 'Board full — no lose state in XOR mode (a finding, not a bug).';
+    m.className = '';
+  }
+}
+
+const modalEl = document.getElementById('modal');
+const helpBtn = document.getElementById('help');
+const closeBtn = document.getElementById('close');
+const modalOpen = () => modalEl.classList.contains('open');
+let lastFocus = null;
+
+function openModal(){
+  lastFocus = document.activeElement;
+  modalEl.classList.add('open');
+  modalEl.setAttribute('aria-hidden', 'false');
+  closeBtn.focus();
+}
+function closeModal(){
+  modalEl.classList.remove('open');
+  modalEl.setAttribute('aria-hidden', 'true');
+  (lastFocus === closeBtn ? helpBtn : lastFocus || helpBtn).focus();
+  lastFocus = null;
+}
+
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && modalOpen()){ e.preventDefault(); closeModal(); return; }
+  // The modal owns the keyboard while it's open — don't move tiles behind it.
+  if(modalOpen()) return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  const map = {
+    ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
+    a:'left', d:'right', w:'up', s:'down'
+  };
+  // Normalize so Shift/Caps Lock don't break WASD.
+  const dir = map[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  if(dir){ e.preventDefault(); move(dir); }
+});
+
+document.querySelectorAll('.arrows button').forEach(b => {
+  b.addEventListener('click', () => move(b.dataset.dir));
+});
+
+let tx=0, ty=0, swiping=false;
+document.addEventListener('touchstart', e => {
+  // The modal is a full-viewport overlay; while it's open every touch belongs to it.
+  swiping = !modalOpen();
+  if(!swiping) return;
+  tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+}, {passive:true});
+document.addEventListener('touchend', e => {
+  if(!swiping) return;
+  swiping = false;
+  if(modalOpen()) return;
+  const dx = e.changedTouches[0].clientX - tx;
+  const dy = e.changedTouches[0].clientY - ty;
+  if(Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+  if(Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left');
+  else move(dy > 0 ? 'down' : 'up');
+}, {passive:true});
+document.addEventListener('touchcancel', () => { swiping = false; }, {passive:true});
+
+document.getElementById('newgame').addEventListener('click', startNormalGame);
+document.getElementById('skip').addEventListener('click', startNormalGame);
+helpBtn.addEventListener('click', openModal);
+closeBtn.addEventListener('click', closeModal);
+document.getElementById('replay').addEventListener('click', () => { closeModal(); startTutorial(); });
+modalEl.addEventListener('click', e => { if(e.target.id === 'modal') closeModal(); });
+
+startTutorial();
+</script>
+</body>
+</html>
