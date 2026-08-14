@@ -59,6 +59,7 @@ mostly determined by the spawn sequence.
 
 ```
 index.html              the whole game
+.nojekyll               serve the root as-is on GitHub Pages, no Jekyll pass
 manifest.webmanifest    PWA metadata (installable to a phone home screen)
 sw.js                   service worker, offline shell cache
 icons/                  generated app icons — do not hand-edit
@@ -113,14 +114,47 @@ already arranges it that way.
 On mobile, itch.io always uses click-to-play and always launches the game fullscreen,
 regardless of the desktop embed setting.
 
+## GitHub Pages
+
+The repository root is the site — `index.html`, `manifest.webmanifest`, `sw.js` and
+`icons/` are already laid out as a servable directory, and every path in them is
+relative. So Pages needs no build step and no workflow: point it at the branch and
+every merge to `main` publishes itself.
+
+Enable it once, in **Settings → Pages**:
+
+| Setting | Value |
+|---|---|
+| Source | **Deploy from a branch** |
+| Branch | `main` |
+| Folder | `/ (root)` |
+
+That publishes to `https://<owner>.github.io/bitforge/`. The first build takes a
+minute or two; after that a push is live within about a minute.
+
+**Do not replace this with an Actions workflow.** One existed and was removed in
+`c87db9e`: `actions/configure-pages` cannot enable a Pages site that does not exist
+yet, and `enablement: true` is refused with *"Resource not accessible by integration"*
+because that endpoint needs admin credentials the workflow token does not have. The
+deploy stayed dependent on the same manual setting either way, and the failing job
+kept `main` red. Deploying from the branch needs no token and has no job to fail.
+
+`.nojekyll` at the root tells Pages to serve the files as they are rather than running
+them through Jekyll.
+
+The site is a project page, so it is served from the `/bitforge/` subdirectory rather
+than the domain root. Nothing needs adjusting for that — `start_url`, `scope` and `id`
+in the manifest are all `./`, the service worker precaches `./` paths and registers
+with a relative URL, so its scope follows the subdirectory automatically.
+
 ## Installing to a phone home screen
 
 itch.io serves games from a sandboxed iframe on a separate origin, so the manifest and
 service worker are ignored there — the game runs fine, it just is not installable from
 an itch.io page. For an installable, offline-capable copy, serve the files from any
-HTTPS origin.
+HTTPS origin — the GitHub Pages URL above is one.
 
-The quickest route needs no repository integration and no CI:
+If you would rather not enable Pages, this route needs no repository integration at all:
 
 1. `./tools/build-itch.sh`
 2. Drag `dist/site/` onto <https://app.netlify.com/drop>
