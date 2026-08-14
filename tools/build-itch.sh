@@ -2,14 +2,14 @@
 # Builds the two shippable artifacts:
 #   dist/site/              a plain folder — drag onto app.netlify.com/drop for an
 #                           HTTPS URL that installs to a phone home screen
-#   dist/xor2048-itch.zip   the itch.io upload; index.html sits at the ZIP ROOT,
+#   dist/bitforge-itch.zip   the itch.io upload; index.html sits at the ZIP ROOT,
 #                           not inside a folder, which itch.io requires
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist="$root/dist"
 site="$dist/site"
-zipfile="$dist/xor2048-itch.zip"
+zipfile="$dist/bitforge-itch.zip"
 
 command -v zip >/dev/null || { echo "error: 'zip' is not installed" >&2; exit 1; }
 

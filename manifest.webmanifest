@@ -1,6 +1,6 @@
 {
-  "name": "XOR-2048 · Binary Merge",
-  "short_name": "XOR-2048",
+  "name": "BitForge 255",
+  "short_name": "BitForge",
   "description": "A 2048-style puzzle where tiles are 8-bit numbers and collisions XOR. Forge the full register: 11111111.",
   "id": "./",
   "start_url": "./",

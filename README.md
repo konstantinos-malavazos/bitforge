@@ -1,4 +1,4 @@
-# XOR-2048 · Binary Merge
+# BitForge 255
 
 A 2048-style puzzle where every tile is an **8-bit number** and colliding tiles **XOR**
 instead of adding. Equal bits cancel, different bits combine. The goal is to forge the
@@ -18,7 +18,28 @@ Score is the number of set bits produced by merges. There is no lose state: each
 collapses to at most two tiles per move, so the board can hold at most nine tiles and
 can never deadlock.
 
-Controls: swipe, arrow keys, WASD, or the on-screen D-pad.
+Controls: swipe, arrow keys, or WASD.
+
+## The shift tool
+
+XOR never carries. Nothing you merge can ever set a bit that neither operand had, so
+bit 7 cannot be built — it can only arrive as a literal `128` spawn, which is 1.5% of
+spawns. The endgame was therefore a wait, not a decision: a median of 45 moves before a
+`128` showed up at all, and a 90th percentile of 557 moves to finish.
+
+Every 50 points earns one `<<` charge. Spending it doubles a tile of your choice, so
+`01000000` becomes `10000000` — the bit you cannot merge your way to. Charges are bought
+with score, so the tool is earned by playing well rather than waited for.
+
+- Cannot target a tile that already holds bit 7; the shift would push it out of the
+  register. The attempt is refused and costs nothing.
+- Does not consume a move and does not spawn a tile.
+- A shift always clears bit 0, so it can never produce `11111111` by itself.
+- XOR rules only. Gate mode spawns from a flat table and does not have the problem.
+
+Arm it with the `<<` button, then tap a tile — or use the arrow keys to move the gold
+cursor and Enter to confirm, so it works without a pointer. Escape cancels, and swiping
+while armed just makes the move.
 
 ## Rule sets
 
@@ -64,7 +85,7 @@ manifest.webmanifest    PWA metadata (installable to a phone home screen)
 sw.js                   service worker, offline shell cache
 icons/                  generated app icons — do not hand-edit
 tools/make-icons.mjs    icon generator (no dependencies; run with node)
-tools/build-itch.sh     produces dist/site/ and dist/xor2048-itch.zip
+tools/build-itch.sh     produces dist/site/ and dist/bitforge-itch.zip
 ```
 
 Regenerate icons after changing the generator:
@@ -89,12 +110,12 @@ The game is built phone-first and is tested down to a 320×568 viewport:
 - Progress, best score, and tutorial completion persist in `localStorage`, and the game
   saves on `visibilitychange` and `pagehide` so a backgrounded tab being evicted does
   not lose the run.
-- A separate landscape layout puts the board beside the D-pad on short viewports.
+- A separate landscape layout puts the board beside the controls on short viewports.
 
 ## Publishing to itch.io
 
 ```sh
-./tools/build-itch.sh      # writes dist/site/ and dist/xor2048-itch.zip
+./tools/build-itch.sh      # writes dist/site/ and dist/bitforge-itch.zip
 ```
 
 Upload that zip, then in the project's edit page:
@@ -171,18 +192,38 @@ From that URL:
 
 ## Balance notes
 
-Simulated over 600 playthroughs of the current rules:
+The board averages ~4 occupied cells out of 16 and never exceeds 5, because every swipe
+force-merges every adjacent pair. The 4×4 grid is mostly empty at all times.
 
-- The board averages ~4 occupied cells out of 16 and never exceeded 5, because every
-  swipe force-merges every adjacent pair. The 4×4 grid is mostly empty at all times.
-- Playing greedily (maximising board popcount) reaches 255 in **100%** of runs, median
-  **205 moves**. Random play reaches it **3.3%** of the time.
-- XOR never carries, so bit 7 can only enter the board as a literal `128` spawn, at
-  1.5% per spawn. The same holds for `64` at 2.5%. The endgame is largely spent waiting
-  on those two spawns.
+The bit-7 wait was measured over 3000 games per row, played by a policy that drives one
+tile toward a full register. "Skill gap" is the random-play median divided by the skilled
+median — how much the player's decisions are worth:
 
-Tuning the spawn table, or making merges conditional so overlapping tiles block instead
-of collapsing, would both shorten that tail. Neither is changed here.
+| | median | p90 | first `128` | skill gap |
+|---|---|---|---|---|
+| No tool, shipped spawn table | 199 | 557 | move 45 | 2.18× |
+| No tool, flat spawn table | 87 | 254 | move 4 | 3.76× |
+| **Shift, 1 charge / 50 points** | **75** | **173** | move 24 | **4.73×** |
+| Shift, 1 charge / 100 points | 104 | 238 | move 36 | 3.74× |
+| Shift, 1 charge / 200 points | 136 | 325 | move 46 | 3.04× |
+
+The tool was chosen over reweighting spawns because of the last column. Flattening the
+spawn table shortens the game for everyone — random play improves almost as much as
+skilled play. The tool is the opposite: random play barely moves (median 433 → 355)
+while skilled play nearly triples (199 → 75), because the gain comes from choosing when
+to spend a charge and which tile to spend it on. It also cuts the frustrating tail
+hardest, p90 557 → 173.
+
+Two alternatives were measured and rejected:
+
+- **Need-weighted spawns** — bias the table toward bits the board is missing. Fastest of
+  everything tested (median 24–39) but the skill gap collapses to 1.28×: when the board
+  hands you the bit you need, there is no decision left.
+- **A 2048-style carry** — identical tiles promote (`a` + `a` = `a<<1`) instead of
+  cancelling, giving a ladder to bit 7. It changes nothing: median 203 against a
+  baseline of 199. With only ~4.5 tiles on a board where every unequal pair merges on
+  contact, identical tiles almost never meet, so the ladder never fires. Removing high
+  spawns to force the ladder drops the win rate to **0%**.
 
 ## License
 

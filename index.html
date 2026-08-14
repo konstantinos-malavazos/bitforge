@@ -11,11 +11,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="XOR-2048">
+<meta name="apple-mobile-web-app-title" content="BitForge">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>XOR-2048 · Binary Merge</title>
+<title>BitForge 255</title>
 <style>
   :root{
     --bg:#0b0e14; --panel:#121722; --cell:#1a2130; --text:#e6edf3;
@@ -163,6 +163,28 @@
   #prompt .skip{ align-self:flex-end; font-size:12px; color:var(--dim); cursor:pointer;
                  background:none; border:none; font:inherit; padding:2px 0; }
 
+  /* Shift tool. XOR never carries, so bit 7 can only ever arrive as a literal 128
+     spawn — this is the earned way to manufacture one instead of waiting. */
+  #tools{
+    width:100%; max-width:480px; display:flex; align-items:center; gap:10px;
+  }
+  #tools[hidden]{ display:none; }
+  #shift{
+    display:flex; align-items:center; gap:7px; padding:6px 12px; font-size:13px;
+    border-color:#2c3547; flex:none;
+  }
+  #shift .op{ font-weight:700; letter-spacing:-1px; }
+  #shift .n{
+    min-width:18px; padding:1px 5px; border-radius:6px; font-size:11px; font-weight:700;
+    background:#2c3547; color:var(--dim);
+  }
+  #shift:not(:disabled) .n{ background:var(--accent); color:#0b0e14; }
+  #shift:disabled{ opacity:.5; cursor:default; }
+  #shift[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent); }
+  #shift-hint{ font-size:11px; color:var(--dim); line-height:1.3; min-width:0; }
+  /* The armed cursor reuses the tutorial highlight, in gold to read as a different mode. */
+  .cell.pick{ box-shadow:0 0 0 3px var(--gold), 0 0 18px rgba(255,209,102,.45); }
+
   #msg{ min-height:18px; font-size:13px; color:var(--dim); text-align:center;
         max-width:480px; line-height:1.35; }
   #msg.win{ color:var(--gold); font-weight:700; }
@@ -180,7 +202,7 @@
     body{
       display:grid;
       grid-template-columns:minmax(0,1fr) minmax(170px, 38%);
-      grid-template-rows:auto auto auto minmax(0,1fr);
+      grid-template-rows:auto auto auto auto minmax(0,1fr);
       column-gap:10px; row-gap:5px;
       /* The portrait rules centre flex items; in grid that stops the stage from
          stretching, which starves the board's container query units. */
@@ -192,7 +214,9 @@
     .topbar{ grid-column:2; grid-row:1; }
     .bar   { grid-column:2; grid-row:2; grid-template-columns:repeat(2, minmax(0,1fr)); }
     #prompt{ grid-column:2; grid-row:3; font-size:12px; padding:6px 10px; }
-    #msg   { grid-column:2; grid-row:4; align-self:start; }
+    #tools { grid-column:2; grid-row:4; }
+    #msg   { grid-column:2; grid-row:5; align-self:start; }
+    #shift-hint{ display:none; }   /* no room beside the board on short viewports */
     .stat{ padding:3px 4px; }
     .stat .k{ font-size:8px; letter-spacing:1px; }
     .legend{ display:none; }
@@ -228,7 +252,7 @@
 </head>
 <body>
   <div class="topbar">
-    <h1>XOR<span>-2048</span></h1>
+    <h1>Bit<span>Forge</span></h1>
     <div class="acts">
       <button id="install" hidden>Install</button>
       <button id="newgame">New</button>
@@ -250,6 +274,15 @@
   </div>
 
   <div id="stage"><div id="board"><div id="cells"></div><div id="layer"></div></div></div>
+
+  <div id="tools" hidden>
+    <button id="shift" type="button" aria-pressed="false" disabled
+            aria-label="Shift a tile left one bit">
+      <span class="op">&lt;&lt;</span><span class="n" id="shift-n">0</span>
+    </button>
+    <span id="shift-hint"></span>
+  </div>
+
   <div id="msg" role="status" aria-live="polite"></div>
 
   <div class="legend" id="legend"></div>
@@ -264,6 +297,10 @@
           <br><span class="mono">0010 ^ 0100 = 0110</span> — different bits combine.</li>
         <li>Equal tiles cancel: <span class="mono">0011 ^ 0011 = 0000</span> — your "delete" tool.</li>
         <li>Overlapping bits are lost: <span class="mono">0110 ^ 0011 = 0101</span> — wasted potential.</li>
+        <li><b>Shift tool.</b> Every 50 points earns a <span class="mono">&lt;&lt;</span> charge.
+          Spend one to double a tile: <span class="mono">01000000</span> becomes
+          <span class="mono">10000000</span>. XOR never carries, so this is the only way to
+          make bit 7 yourself instead of waiting for a 128 to spawn.</li>
         <li>Goal: forge the full register <span class="mono">11111111 = 255</span>.</li>
         <li>Score = total bits set on merges. No lose state — it's a puzzle, take your time.</li>
       </ul>
@@ -316,6 +353,15 @@ const tutKey  = () => `xor2048.tutorial.${mode}.v2`;
 const MODE_KEY = 'xor2048.mode.v2';
 
 let grid, score, moves, won, over, bytes, best = 0;
+/* Shift charges are bought with score rather than waited for, which is the whole
+   point: under XOR nothing carries, so bit 7 can otherwise only arrive as a
+   literal 128 spawn (1.5% of spawns — a median 44-move wait). Earning the tool
+   turns that wait into a decision. XOR rules only; gate mode spawns high bits
+   from a flat table and does not have the problem. */
+const SHIFT_COST = 50;
+let shiftsUsed = 0;
+let armed = false;              // tool is waiting for a target
+let pick = { r: 0, c: 0 };      // keyboard cursor while armed
 let tutorial = { active: false, step: 0 };
 let lastChanged = new Set();   // cells that merged on the last move, for the merge flash
 
@@ -328,7 +374,7 @@ const store = {
 
 function saveGame(){
   if(tutorial.active) return;
-  store.set(saveKey(), JSON.stringify({ grid, score, moves, won, over, bytes }));
+  store.set(saveKey(), JSON.stringify({ grid, score, moves, won, over, bytes, shiftsUsed }));
 }
 function loadGame(){
   const raw = store.get(saveKey());
@@ -342,6 +388,12 @@ function loadGame(){
     score = Number(s.score) || 0;
     moves = Number(s.moves) || 0;
     bytes = Number(s.bytes) || 0;
+    // A save from before the tool existed has no spend recorded. Treating it as
+    // "everything earned so far is already spent" avoids handing a long-running
+    // game a windfall of charges on first load, without docking it either.
+    shiftsUsed = s.shiftsUsed === undefined
+      ? Math.floor(score / SHIFT_COST)
+      : Math.max(0, Number(s.shiftsUsed) || 0);
     won = !!s.won;
     over = !!s.over;
     return true;
@@ -577,6 +629,7 @@ function isStuck(){
 
 function move(dir){
   if(modalOpen() || over) return;
+  disarmShift();   // a swipe means they want to move, not to target
   // A move arriving mid-slide snaps the previous one home rather than being
   // dropped, so fast play stays responsive without queueing.
   finishSlide();
@@ -658,6 +711,7 @@ function loadTutorialStep(i){
 
 function startTutorial(){
   cancelSlide();
+  armed = false; shiftsUsed = 0;
   tutorial = { active: true, step: 0 };
   won = false; over = false; score = 0; moves = 0; bytes = 0;
   store.del(saveKey());
@@ -667,6 +721,7 @@ function startTutorial(){
 
 function startNormalGame(){
   cancelSlide();
+  armed = false; shiftsUsed = 0;
   grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
   score = 0; moves = 0; won = false; over = false; bytes = 0;
   lastChanged = new Set();
@@ -733,6 +788,7 @@ let tutorialHold = 0;
 function place(el, r, c){
   el.style.setProperty('--x', c);
   el.style.setProperty('--y', r);
+  el.dataset.r = r; el.dataset.c = c;   // lets a tap map back to a cell
 }
 
 function addTile(r, c, v, cls){
@@ -829,7 +885,80 @@ function cancelSlide(){
   tutorialHold = 0;
 }
 
+/* ---------- shift tool ---------- */
+const toolsEl = document.getElementById('tools');
+const shiftBtn = document.getElementById('shift');
+const shiftHint = document.getElementById('shift-hint');
+
+const toolsAvailable = () => mode === 'xor' && !tutorial.active && !over;
+const charges = () => Math.max(0, Math.floor(score / SHIFT_COST) - shiftsUsed);
+// Bit 7 has nowhere to go: shifting it would push the tile out of the register.
+const canShift = (r, c) => grid[r][c] !== 0 && !(grid[r][c] & 128);
+
+function renderTools(){
+  toolsEl.hidden = !toolsAvailable();
+  if(toolsEl.hidden) return;
+  const n = charges();
+  document.getElementById('shift-n').textContent = n;
+  shiftBtn.disabled = n === 0;
+  shiftBtn.setAttribute('aria-pressed', String(armed));
+  shiftHint.textContent = armed
+    ? 'Tap a tile, or use the arrow keys and Enter. Esc cancels.'
+    : n === 0
+      ? `Score ${SHIFT_COST - (score % SHIFT_COST)} more to earn a shift.`
+      : 'Doubles one tile — a 64 becomes the 128 you cannot merge your way to.';
+}
+
+function firstShiftable(){
+  // Default the cursor to the tile the tool is most likely wanted on.
+  let best = null;
+  for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++){
+    if(canShift(r, c) && (!best || grid[r][c] > grid[best.r][best.c])) best = { r, c };
+  }
+  return best;
+}
+
+function armShift(){
+  if(!toolsAvailable() || !charges()) return;
+  const start = firstShiftable();
+  if(!start){ setMsg('Nothing here can be shifted — every tile already holds bit 7.', 'nudge'); return; }
+  armed = true;
+  pick = start;
+  updateHighlight();
+  renderTools();
+}
+
+function disarmShift(){
+  if(!armed) return;
+  armed = false;
+  updateHighlight();
+  renderTools();
+}
+
+function applyShift(r, c){
+  if(!armed || !charges()) return;
+  if(!canShift(r, c)){
+    setMsg(grid[r][c] ? 'That tile already holds bit 7 — shifting would overflow the register.'
+                      : 'Pick a tile, not an empty cell.', 'nudge');
+    return;
+  }
+  finishSlide();
+  grid[r][c] <<= 1;
+  shiftsUsed++;
+  armed = false;
+  lastChanged = new Set([r + ',' + c]);   // reuse the merge pop for the promotion
+  updateHighlight();
+  syncTiles();
+  renderStats();
+  setMsg('');
+  // A shift always clears bit 0, so it can never produce 255 on its own — but the
+  // milestone check is cheap and keeps the win path in one place.
+  checkMilestones(0);
+  saveGame();
+}
+
 function renderStats(){
+  renderTools();
   document.getElementById('score').textContent = score;
   document.getElementById('moves').textContent = moves;
   document.getElementById('bestv').textContent = best;
@@ -838,17 +967,23 @@ function renderStats(){
   document.getElementById('goalv').textContent = mode === 'gate' ? bytes : '11111111';
 }
 
-// Full, non-animated refresh — for boot, new games and tutorial steps, where the
-// board is replaced rather than moved.
-function render(){
+function updateHighlight(){
   const hlSet = tutorial.active
     ? new Set(tutorialSteps()[tutorial.step].hl.map(p => p[0]+','+p[1]))
     : null;
   for(let r=0;r<SIZE;r++){
     for(let c=0;c<SIZE;c++){
-      cells[r*SIZE + c].classList.toggle('hl', !!(hlSet && hlSet.has(r+','+c)));
+      const cell = cells[r*SIZE + c];
+      cell.classList.toggle('hl', !!(hlSet && hlSet.has(r+','+c)));
+      cell.classList.toggle('pick', armed && pick.r === r && pick.c === c);
     }
   }
+}
+
+// Full, non-animated refresh — for boot, new games and tutorial steps, where the
+// board is replaced rather than moved.
+function render(){
+  updateHighlight();
   syncTiles();
   renderStats();
 }
@@ -899,7 +1034,35 @@ document.addEventListener('keydown', e => {
   };
   // Normalize so Shift/Caps Lock don't break WASD.
   const dir = map[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+
+  // While the tool is armed the same keys drive the target cursor instead of the
+  // board, so the shift is reachable without a pointer.
+  if(armed){
+    if(e.key === 'Escape'){ e.preventDefault(); disarmShift(); return; }
+    if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); applyShift(pick.r, pick.c); return; }
+    if(dir){
+      e.preventDefault();
+      const step = { left:[0,-1], right:[0,1], up:[-1,0], down:[1,0] }[dir];
+      pick = { r: Math.min(SIZE-1, Math.max(0, pick.r + step[0])),
+               c: Math.min(SIZE-1, Math.max(0, pick.c + step[1])) };
+      updateHighlight();
+      return;
+    }
+    return;
+  }
+
   if(dir){ e.preventDefault(); move(dir); }
+});
+
+shiftBtn.addEventListener('click', () => { armed ? disarmShift() : armShift(); });
+
+// Taps land as clicks on both pointer and touch — the swipe handler already
+// discards anything under SWIPE_MIN, so targeting does not disturb the gesture.
+layerEl.addEventListener('click', e => {
+  if(!armed) return;
+  const tile = e.target.closest('.tile');
+  if(!tile) return;
+  applyShift(Number(tile.dataset.r), Number(tile.dataset.c));
 });
 
 const SWIPE_MIN = 24;
@@ -968,13 +1131,15 @@ if('serviceWorker' in navigator && location.protocol === 'https:'){
 /* ---------- rule set switching ---------- */
 const LEGENDS = {
   xor: 'Swipe or use <b>arrow keys / WASD</b>. Colliding tiles <b>XOR</b>: equal bits cancel, '
-     + 'different bits combine. Equal tiles vanish to <b>0</b>. Forge <b>11111111</b> (255).',
+     + 'different bits combine. Equal tiles vanish to <b>0</b>. Every 50 points earns a '
+     + '<b>&lt;&lt;</b> shift that doubles a tile. Forge <b>11111111</b> (255).',
   gate: 'Swipe or use <b>arrow keys / WASD</b>. Tiles combine only if they share <b>no bits</b>; '
       + 'equal tiles <b>annihilate</b>; any overlap <b>blocks</b>. Play for score — the board fills up.',
 };
 const MODE_NOTES = {
   xor: 'Original rules. Every collision merges, so the board never holds more than nine tiles '
-     + 'and cannot be lost.',
+     + 'and cannot be lost. The shift tool is available here only — gate mode spawns high bits '
+     + 'from a flat table and does not have the bit-7 problem.',
   gate: 'Prototype. Overlapping tiles block instead of merging, which fills the board and makes '
       + 'a lose state possible. Uses a flat spawn table. Progress and best score are tracked '
       + 'separately per rule set.',
@@ -988,13 +1153,14 @@ function applyModeChrome(){
   for(const m of MODES){
     document.getElementById('mode-' + m).setAttribute('aria-pressed', String(m === mode));
   }
-  document.title = mode === 'gate' ? 'XOR-2048 · Gate rules' : 'XOR-2048 · Binary Merge';
+  document.title = mode === 'gate' ? 'BitForge 255 · Gate rules' : 'BitForge 255';
 }
 
 function bootMode(){
   cancelSlide();
   clearTiles();              // the outgoing rule set's board is not this one's
   lastChanged = new Set();   // no merge flash on a board we are only restoring
+  armed = false; shiftsUsed = 0;
   best = Number(store.get(bestKey())) || 0;
   applyModeChrome();
   if(loadGame()){

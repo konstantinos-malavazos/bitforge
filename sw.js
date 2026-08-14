@@ -1,6 +1,6 @@
-/* Offline shell for XOR-2048.
+/* Offline shell for BitForge.
    Bump CACHE when any precached file changes — the old cache is dropped on activate. */
-const CACHE = 'xor2048-v2';
+const CACHE = 'bitforge-v3';
 
 const SHELL = [
   './',
