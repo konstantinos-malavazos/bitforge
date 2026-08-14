@@ -4,7 +4,109 @@ A 2048-style puzzle where every tile is an **8-bit number** and colliding tiles 
 instead of adding. Equal bits cancel, different bits combine. The goal is to forge the
 full register: `11111111` (255).
 
-Single-page game — no build step, no dependencies, no framework.
+Single-page game — no build step, no dependencies, no framework. Open `index.html`.
+
+## Rules
+
+| Situation | Example | Result |
+|---|---|---|
+| Different bits combine | `0010 ^ 0100` | `0110` |
+| Equal tiles cancel | `0011 ^ 0011` | `0000` — the "delete" tool |
+| Overlapping bits are lost | `0110 ^ 0011` | `0101` — wasted potential |
+
+Score is the number of set bits produced by merges. There is no lose state: each line
+collapses to at most two tiles per move, so the board can hold at most nine tiles and
+can never deadlock.
+
+Controls: swipe, arrow keys, WASD, or the on-screen D-pad.
+
+## Layout
+
+```
+index.html              the whole game
+manifest.webmanifest    PWA metadata (installable to a phone home screen)
+sw.js                   service worker, offline shell cache
+icons/                  generated app icons — do not hand-edit
+tools/make-icons.mjs    icon generator (no dependencies; run with node)
+tools/build-itch.sh     produces dist/xor2048-itch.zip
+```
+
+Regenerate icons after changing the generator:
+
+```sh
+node tools/make-icons.mjs
+```
+
+## Mobile
+
+The game is built phone-first and is tested down to a 320×568 viewport:
+
+- Height is driven by `dvh` with a `visualViewport` override, so a showing/hiding URL
+  bar — and itch.io's fullscreen iframe on Android — does not cut off the layout.
+- `overscroll-behavior: none` plus a non-scrolling body stops swipe-down from
+  triggering pull-to-refresh mid-game.
+- The board opts out of browser panning with `touch-action: none`; everything else uses
+  `touch-action: manipulation`, which kills double-tap zoom and tap delay while leaving
+  pinch-zoom available for accessibility.
+- Padding respects `env(safe-area-inset-*)` for notches and home indicators.
+- Multi-touch is treated as a pinch and never as a swipe.
+- Progress, best score, and tutorial completion persist in `localStorage`, and the game
+  saves on `visibilitychange` and `pagehide` so a backgrounded tab being evicted does
+  not lose the run.
+- A separate landscape layout puts the board beside the D-pad on short viewports.
+
+## Publishing to itch.io
+
+```sh
+./tools/build-itch.sh      # writes dist/xor2048-itch.zip
+```
+
+Upload that zip, then in the project's edit page:
+
+| Setting | Value |
+|---|---|
+| Kind of project | HTML |
+| Uploaded file | check **This file will be played in the browser** |
+| Viewport dimensions | `480 × 800` (any portrait ratio; the layout is fluid) |
+| Mobile friendly | **on** — enables orientation control and drops the "may not work" warning |
+| Orientation | Portrait |
+| Fullscreen button | on |
+
+`index.html` must sit at the root of the zip, not inside a folder — the build script
+already arranges it that way.
+
+On mobile, itch.io always uses click-to-play and always launches the game fullscreen,
+regardless of the desktop embed setting.
+
+## Installing to a phone home screen
+
+itch.io serves games from a sandboxed iframe on a separate origin, so the manifest and
+service worker are ignored there — the game runs fine, it just is not installable from
+an itch.io page. For an installable, offline-capable copy, host the files anywhere with
+HTTPS. The included workflow deploys to GitHub Pages on every push to `main`; enable it
+under **Settings → Pages → Source: GitHub Actions**.
+
+From that URL:
+
+- **Android/Chrome** — an "Install" button appears in the top bar (`beforeinstallprompt`).
+- **iOS/Safari** — Share → *Add to Home Screen*. iOS does not support install prompts,
+  so no button is shown; the `apple-touch-icon` and standalone meta tags are already in
+  place.
+
+## Balance notes
+
+Simulated over 600 playthroughs of the current rules:
+
+- The board averages ~4 occupied cells out of 16 and never exceeded 5, because every
+  swipe force-merges every adjacent pair. The 4×4 grid is mostly empty at all times.
+- Playing greedily (maximising board popcount) reaches 255 in **100%** of runs, median
+  **205 moves**. Random play reaches it **3.3%** of the time.
+- XOR never carries, so bit 7 can only enter the board as a literal `128` spawn, at
+  1.5% per spawn. The same holds for `64` at 2.5%. The endgame is largely spent waiting
+  on those two spawns.
+
+Tuning the spawn table, or making merges conditional so overlapping tiles block instead
+of collapsing, would both shorten that tail. Neither is changed here.
 
 ## License
 

@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- viewport-fit=cover so we can pad against notches with env(safe-area-inset-*).
+     Zoom is deliberately left enabled; double-tap zoom is suppressed via touch-action. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0e14">
+<meta name="description" content="A 2048-style puzzle where tiles are 8-bit numbers and collisions XOR. Forge the full register: 11111111.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="XOR-2048">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>XOR-2048 · Binary Merge</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#121722; --cell:#1a2130; --text:#e6edf3;
+    --accent:#3fb6ff; --gold:#ffd166; --dim:#8b98ab; --edge:#232b3d;
+    --gap:clamp(5px, 1.6vmin, 10px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+
+  html{ height:100%; overscroll-behavior:none; }
+  body{
+    margin:0;
+    /* Layered fallbacks: dvh tracks the URL bar on mobile; --app-h is set from
+       visualViewport for embedded/fullscreen iframes that lie about dvh. */
+    height:100vh;
+    height:100dvh;
+    height:var(--app-h, 100dvh);
+    overflow:hidden;
+    overscroll-behavior:none;
+    /* Allows pinch-zoom (accessibility) but kills double-tap zoom and tap delay. */
+    touch-action:manipulation;
+    display:flex; flex-direction:column; align-items:center;
+    gap:clamp(6px, 1.4vmin, 14px);
+    padding:calc(env(safe-area-inset-top) + clamp(8px, 2vmin, 20px))
+            calc(env(safe-area-inset-right) + clamp(10px, 3vw, 20px))
+            calc(env(safe-area-inset-bottom) + clamp(8px, 2vmin, 20px))
+            calc(env(safe-area-inset-left) + clamp(10px, 3vw, 20px));
+    background:radial-gradient(1200px 700px at 50% -10%, #172032 0%, var(--bg) 60%);
+    background-attachment:fixed;
+    color:var(--text);
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .topbar{
+    width:100%; max-width:480px;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  h1{ margin:0; font-size:clamp(15px, 4.2vw, 22px); letter-spacing:1px; white-space:nowrap; }
+  h1 span{ color:var(--accent); }
+  .topbar .acts{ display:flex; gap:6px; }
+
+  .bar{
+    width:100%; max-width:480px;
+    display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:6px;
+  }
+  .stat{
+    background:var(--panel); border:1px solid var(--edge); border-radius:10px;
+    padding:5px 4px; text-align:center; min-width:0;
+  }
+  .stat .k{ font-size:9px; letter-spacing:1.5px; color:var(--dim); text-transform:uppercase; }
+  .stat .v{ font-size:clamp(13px, 3.8vw, 19px); font-weight:700; line-height:1.25;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #goal .v{ color:var(--gold); font-size:clamp(10px, 2.9vw, 14px); letter-spacing:.5px; }
+  #best .v{ color:var(--gold); }
+
+  button{
+    background:var(--panel); color:var(--text); border:1px solid #2c3547;
+    border-radius:10px; padding:7px 11px; font:inherit; font-size:12px;
+    cursor:pointer; letter-spacing:.5px; touch-action:manipulation;
+  }
+  button:active{ transform:translateY(1px); }
+  button:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  @media (hover:hover){ button:hover{ border-color:var(--accent); } }
+  button.ghost{ background:transparent; color:var(--dim); border-color:transparent; }
+  #install[hidden]{ display:none; }
+
+  /* The stage owns the swipe gesture, so it opts out of browser panning. */
+  #stage{
+    flex:1 1 0; min-height:0; width:100%;
+    display:flex; align-items:center; justify-content:center;
+    touch-action:none;
+    container-type:size;   /* lets the board size off this box in both axes */
+  }
+  #board{
+    display:grid; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr);
+    gap:var(--gap); background:var(--panel); padding:var(--gap);
+    border-radius:14px; border:1px solid var(--edge);
+    /* A definite width makes height follow from aspect-ratio, but max-height then
+       clamps height without shrinking width. Taking the min of both container axes
+       keeps the board square whichever axis is tighter. */
+    width:min(100cqw, 100cqh, 480px);
+    aspect-ratio:1;
+  }
+  .cell{
+    background:var(--cell); border-radius:8px; position:relative; min-width:0; min-height:0;
+    transition:box-shadow .15s;
+  }
+  .cell.hl{ box-shadow:0 0 0 3px var(--accent), 0 0 18px rgba(63,182,255,.5); }
+  .tile{
+    position:absolute; inset:clamp(2px,.8vmin,4px); border-radius:6px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    box-shadow:0 0 0 1px rgba(255,255,255,.05) inset;
+    container-type:size;   /* tile text scales with the board, not the viewport */
+  }
+  .tile.spawned{ animation:pop .13s ease-out; }
+  .tile.merged{ animation:merge .2s ease-out; }
+  .tile .bin{ font-size:clamp(7px, 14cqmin, 13px); letter-spacing:.5px; opacity:.9; }
+  .tile .dec{ font-size:clamp(13px, 30cqmin, 26px); font-weight:700; line-height:1; margin-top:2px; }
+  .tile.dense{ color:#0b0e14; }
+  @keyframes pop{ from{ transform:scale(.6); opacity:0; } to{ transform:scale(1); opacity:1; } }
+  @keyframes merge{ 0%{ transform:scale(.82); } 60%{ transform:scale(1.08); } 100%{ transform:scale(1); } }
+  @media (prefers-reduced-motion:reduce){
+    .tile.spawned, .tile.merged{ animation:none; }
+    .cell{ transition:none; }
+  }
+
+  #prompt{
+    width:100%; max-width:480px; background:var(--panel);
+    border:1px solid #2c3547; border-left:3px solid var(--accent);
+    border-radius:10px; padding:9px 12px; font-size:13px; line-height:1.45;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  #prompt .step{ font-size:10px; letter-spacing:1.5px; color:var(--accent); text-transform:uppercase; }
+  #prompt[hidden]{ display:none; }
+  #prompt .skip{ align-self:flex-end; font-size:12px; color:var(--dim); cursor:pointer;
+                 background:none; border:none; font:inherit; padding:2px 0; }
+
+  #msg{ min-height:18px; font-size:13px; color:var(--dim); text-align:center;
+        max-width:480px; line-height:1.35; }
+  #msg.win{ color:var(--gold); font-weight:700; }
+  #msg.nudge{ color:var(--accent); }
+
+  .dpad{
+    display:grid; grid-template-columns:repeat(3, clamp(46px, 14vmin, 58px));
+    grid-template-rows:repeat(2, clamp(40px, 11vmin, 52px)); gap:5px; flex:0 0 auto;
+  }
+  .dpad button{ padding:0; font-size:17px; }
+  .up{ grid-area:1/2; } .left{ grid-area:2/1; } .down{ grid-area:2/2; } .right{ grid-area:2/3; }
+
+  .legend{ font-size:12px; color:var(--dim); text-align:center; max-width:480px; line-height:1.5; }
+  .legend b{ color:var(--accent); }
+
+  /* Short viewports (most phones): drop the prose, the modal still has it. */
+  @media (max-height:760px){ .legend{ display:none; } }
+
+  /* Landscape phones: stacking leaves no height for the board, so put it beside
+     the controls and let it span the full column. */
+  @media (orientation:landscape) and (max-height:560px){
+    body{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) minmax(170px, 38%);
+      grid-template-rows:auto auto auto minmax(0,1fr);
+      column-gap:10px; row-gap:5px;
+      /* The portrait rules centre flex items; in grid that stops the stage from
+         stretching, which starves the board's container query units. */
+      align-items:stretch; justify-items:stretch;
+      padding-top:calc(env(safe-area-inset-top) + 6px);
+      padding-bottom:calc(env(safe-area-inset-bottom) + 6px);
+    }
+    #stage { grid-column:1; grid-row:1 / -1; align-self:stretch; justify-self:stretch; }
+    .topbar{ grid-column:2; grid-row:1; }
+    .bar   { grid-column:2; grid-row:2; grid-template-columns:repeat(2, minmax(0,1fr)); }
+    #prompt{ grid-column:2; grid-row:3; font-size:12px; padding:6px 10px; }
+    #msg   { grid-column:2; grid-row:4; align-self:start; }
+    .dpad  { grid-column:2; grid-row:4; align-self:end; justify-self:center; }
+    .stat{ padding:3px 4px; }
+    .stat .k{ font-size:8px; letter-spacing:1px; }
+    .legend{ display:none; }
+  }
+
+  #modal{
+    position:fixed; inset:0; background:rgba(5,8,14,.86); display:none;
+    align-items:center; justify-content:center; z-index:10;
+    padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);
+    overscroll-behavior:contain;
+  }
+  #modal.open{ display:flex; }
+  .card{
+    background:var(--panel); border:1px solid #2c3547; border-radius:14px;
+    max-width:460px; width:100%; max-height:100%; overflow-y:auto; padding:20px;
+    display:flex; flex-direction:column; gap:12px; font-size:14px; line-height:1.55;
+    -webkit-overflow-scrolling:touch;
+  }
+  .card h2{ margin:0; font-size:17px; }
+  .card ul{ margin:0; padding-left:18px; }
+  .card li{ margin-bottom:7px; }
+  .card .mono{ color:var(--accent); }
+  .card .row{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>XOR<span>-2048</span></h1>
+    <div class="acts">
+      <button id="install" hidden>Install</button>
+      <button id="newgame">New</button>
+      <button class="ghost" id="help">How to play</button>
+    </div>
+  </div>
+
+  <div class="bar">
+    <div class="stat"><div class="k">Score</div><div class="v" id="score">0</div></div>
+    <div class="stat" id="best"><div class="k">Best</div><div class="v" id="bestv">0</div></div>
+    <div class="stat" id="goal"><div class="k">Goal</div><div class="v">11111111</div></div>
+    <div class="stat"><div class="k">Moves</div><div class="v" id="moves">0</div></div>
+  </div>
+
+  <div id="prompt" hidden>
+    <div class="step" id="prompt-step"></div>
+    <div id="prompt-text"></div>
+    <button class="skip" id="skip">skip tutorial →</button>
+  </div>
+
+  <div id="stage"><div id="board"></div></div>
+  <div id="msg" role="status" aria-live="polite"></div>
+
+  <div class="dpad" role="group" aria-label="Move tiles">
+    <button class="up" data-dir="up" aria-label="Move up">▲</button>
+    <button class="left" data-dir="left" aria-label="Move left">◀</button>
+    <button class="down" data-dir="down" aria-label="Move down">▼</button>
+    <button class="right" data-dir="right" aria-label="Move right">▶</button>
+  </div>
+
+  <div class="legend">
+    Swipe or use <b>arrow keys / WASD</b>. Colliding tiles <b>XOR</b>: equal bits cancel,
+    different bits combine. Equal tiles vanish to <b>0</b>. Forge <b>11111111</b> (255).
+  </div>
+
+  <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
+    <div class="card">
+      <h2 id="modal-title">How to play</h2>
+      <ul>
+        <li>Every tile is an <span class="mono">8-bit number</span> (shown as binary + decimal).</li>
+        <li>Swiping slides tiles; when two collide they <span class="mono">XOR</span>:
+          <br><span class="mono">0010 ^ 0100 = 0110</span> — different bits combine.</li>
+        <li>Equal tiles cancel: <span class="mono">0011 ^ 0011 = 0000</span> — your "delete" tool.</li>
+        <li>Overlapping bits are lost: <span class="mono">0110 ^ 0011 = 0101</span> — wasted potential.</li>
+        <li>Goal: forge the full register <span class="mono">11111111 = 255</span>.</li>
+        <li>Score = total bits set on merges. No lose state — it's a puzzle, take your time.</li>
+      </ul>
+      <div class="row">
+        <button class="ghost" id="replay">Replay tutorial</button>
+        <button id="close">Got it</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SIZE = 4;
+const SAVE_KEY = 'xor2048.save.v1';
+const BEST_KEY = 'xor2048.best.v1';
+const TUT_KEY  = 'xor2048.tutorial.v1';
+
+let grid, score, moves, won, best = 0;
+let tutorial = { active: false, step: 0 };
+let lastChanged = new Set();   // cells that merged on the last move, for the merge flash
+
+/* ---------- storage (may throw in private mode or a sandboxed iframe) ---------- */
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v){ try { localStorage.setItem(k, v); } catch { /* non-fatal */ } },
+  del(k){ try { localStorage.removeItem(k); } catch { /* non-fatal */ } },
+};
+
+function saveGame(){
+  if(tutorial.active) return;
+  store.set(SAVE_KEY, JSON.stringify({ grid, score, moves, won }));
+}
+function loadGame(){
+  const raw = store.get(SAVE_KEY);
+  if(!raw) return false;
+  try {
+    const s = JSON.parse(raw);
+    if(!Array.isArray(s.grid) || s.grid.length !== SIZE) return false;
+    if(!s.grid.every(r => Array.isArray(r) && r.length === SIZE
+                          && r.every(v => Number.isInteger(v) && v >= 0 && v <= 255))) return false;
+    grid = s.grid.map(r => r.slice());
+    score = Number(s.score) || 0;
+    moves = Number(s.moves) || 0;
+    won = !!s.won;
+    return true;
+  } catch { return false; }
+}
+
+/* ---------- rules ---------- */
+const TUTORIAL = [
+  {
+    title: 'Step 1 of 4 · XOR merge',
+    text: 'Tiles are binary. When two collide, they XOR. Swipe <b>LEFT</b> to merge 0010 and 0100 into 0110.',
+    dir: 'left',
+    board: [[2,4,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g[0][0] === 6
+  },
+  {
+    title: 'Step 2 of 4 · Equal tiles cancel',
+    text: 'Equal tiles XOR to 0 and vanish — your cleanup tool. Swipe <b>LEFT</b> to clear these two.',
+    dir: 'left',
+    board: [[3,3,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g[0][0] === 0 && g[0][1] === 0
+  },
+  {
+    title: 'Step 3 of 4 · Overlapping bits are lost',
+    text: 'Shared bits cancel: 0110 ^ 0011 = 0101 — two 2-bit tiles collapse to one. Swipe <b>LEFT</b>.',
+    dir: 'left',
+    board: [[6,3,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g[0][0] === 5
+  },
+  {
+    title: 'Step 4 of 4 · Forge the register',
+    text: 'Final: 11111110 ^ 00000001 = 11111111. Swipe <b>LEFT</b> to win.',
+    dir: 'left',
+    board: [[254,1,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g.flat().includes(255)
+  }
+];
+
+function popcount(n){ let c=0; while(n){ c += n&1; n >>= 1; } return c; }
+
+function randomTile(){
+  const r = Math.random();
+  let k;
+  if(r < .40) k = 0;
+  else if(r < .60) k = 1;
+  else if(r < .75) k = 2;
+  else if(r < .85) k = 3;
+  else if(r < .92) k = 4;
+  else if(r < .96) k = 5;
+  else if(r < .985) k = 6;
+  else k = 7;
+  return 1 << k;
+}
+
+function emptyCells(){
+  const e = [];
+  for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) if(grid[r][c]===0) e.push([r,c]);
+  return e;
+}
+
+function spawn(){
+  const e = emptyCells();
+  if(!e.length) return false;
+  const [r,c] = e[Math.floor(Math.random()*e.length)];
+  grid[r][c] = randomTile();
+  return true;
+}
+
+function coord(dir, i, j){
+  if(dir==='left')  return [i, j];
+  if(dir==='right') return [i, SIZE-1-j];
+  if(dir==='up')    return [j, i];
+  return [SIZE-1-j, i];
+}
+
+function getLines(dir){
+  const lines = [];
+  for(let i=0;i<SIZE;i++){
+    const line = [];
+    for(let j=0;j<SIZE;j++){ const [r,c] = coord(dir,i,j); line.push(grid[r][c]); }
+    lines.push(line);
+  }
+  return lines;
+}
+
+function setLines(dir, lines){
+  for(let i=0;i<SIZE;i++){
+    for(let j=0;j<SIZE;j++){ const [r,c] = coord(dir,i,j); grid[r][c] = lines[i][j]; }
+  }
+}
+
+function mergeLine(line){
+  const tiles = line.filter(v => v !== 0);
+  const out = [];
+  const mergedAt = [];   // output indices produced by a merge, for the flash
+  let gained = 0;
+  let i = 0;
+  while(i < tiles.length){
+    if(i + 1 < tiles.length){
+      const m = tiles[i] ^ tiles[i+1];
+      if(m !== 0){ mergedAt.push(out.length); out.push(m); gained += popcount(m); }
+      i += 2;
+    } else {
+      out.push(tiles[i]); i += 1;
+    }
+  }
+  while(out.length < SIZE) out.push(0);
+  return { out, gained, mergedAt };
+}
+
+function applyMove(dir){
+  const before = grid.flat().join(',');
+  let gained = 0;
+  const merged = new Set();
+  const next = getLines(dir).map((l, i) => {
+    const r = mergeLine(l);
+    gained += r.gained;
+    for(const j of r.mergedAt){ const [rr,cc] = coord(dir, i, j); merged.add(rr+','+cc); }
+    return r.out;
+  });
+  setLines(dir, next);
+  return { changed: grid.flat().join(',') !== before, gained, merged };
+}
+
+function move(dir){
+  if(modalOpen()) return;
+
+  if(tutorial.active){
+    const step = TUTORIAL[tutorial.step];
+    if(dir !== step.dir){
+      setMsg('Try swiping ' + step.dir.toUpperCase() + '.', 'nudge');
+      return;
+    }
+    const res = applyMove(dir);
+    if(!res.changed) return;
+    lastChanged = res.merged;
+    buzz(res.gained);
+    render();
+    if(step.check(grid)) advanceTutorial();
+    return;
+  }
+
+  const res = applyMove(dir);
+  if(!res.changed) return;
+  lastChanged = res.merged;
+  score += res.gained;
+  moves++;
+  if(score > best){ best = score; store.set(BEST_KEY, String(best)); }
+  spawn();
+  buzz(res.gained);
+  render();
+  checkWin();
+  saveGame();
+}
+
+function buzz(gained){
+  if(!gained) return;
+  if(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  try { navigator.vibrate && navigator.vibrate(8); } catch { /* unsupported */ }
+}
+
+/* ---------- flow ---------- */
+function setMsg(text, cls){
+  const m = document.getElementById('msg');
+  m.textContent = text || '';
+  m.className = cls || '';
+}
+
+function advanceTutorial(){
+  tutorial.step++;
+  if(tutorial.step >= TUTORIAL.length){
+    tutorial.active = false;
+    document.getElementById('prompt').hidden = true;
+    store.set(TUT_KEY, 'done');
+    // startNormalGame() clears #msg, so set the completion text after it runs.
+    startNormalGame();
+    setMsg('Tutorial complete! Now forge 255 for real. 🎯', 'win');
+  } else {
+    loadTutorialStep(tutorial.step);
+    render();
+  }
+}
+
+function loadTutorialStep(i){
+  const s = TUTORIAL[i];
+  grid = s.board.map(r => r.slice());
+  lastChanged = new Set();
+  document.getElementById('prompt').hidden = false;
+  document.getElementById('prompt-step').textContent = s.title;
+  document.getElementById('prompt-text').innerHTML = s.text;
+  setMsg('');
+}
+
+function startTutorial(){
+  tutorial = { active: true, step: 0 };
+  won = false; score = 0; moves = 0;
+  store.del(SAVE_KEY);
+  loadTutorialStep(0);
+  render();
+}
+
+function startNormalGame(){
+  grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
+  score = 0; moves = 0; won = false;
+  lastChanged = new Set();
+  tutorial.active = false;
+  document.getElementById('prompt').hidden = true;
+  setMsg('');
+  spawn(); spawn();
+  render();
+  saveGame();
+}
+
+function checkWin(){
+  if(won) return;
+  if(grid.flat().some(v => v === 255)){
+    won = true;
+    setMsg('🎉 11111111 forged. Keep going?', 'win');
+  }
+}
+
+/* ---------- rendering ---------- */
+function colorFor(v){
+  const pc = popcount(v);
+  if(v === 255) return '#ffd166';
+  const hues = [0, 210, 195, 175, 150, 120, 90, 60, 40];
+  const hue = hues[Math.min(pc, hues.length-1)];
+  return `hsl(${hue}, 60%, ${50 + pc*3}%)`;
+}
+
+const board = document.getElementById('board');
+const cells = [];
+for(let i=0;i<SIZE*SIZE;i++){
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  board.appendChild(cell);
+  cells.push(cell);
+}
+
+// Cells persist across renders; only tiles that actually changed re-animate,
+// so the board no longer flashes in full on every move.
+function render(){
+  const hlSet = tutorial.active
+    ? new Set(TUTORIAL[tutorial.step].hl.map(p => p[0]+','+p[1]))
+    : null;
+
+  for(let r=0;r<SIZE;r++){
+    for(let c=0;c<SIZE;c++){
+      const cell = cells[r*SIZE + c];
+      const key = r+','+c;
+      cell.classList.toggle('hl', !!(hlSet && hlSet.has(key)));
+
+      const v = grid[r][c];
+      let tile = cell.firstElementChild;
+
+      if(v === 0){
+        if(tile) tile.remove();
+        continue;
+      }
+      if(!tile){
+        tile = document.createElement('div');
+        tile.innerHTML = '<span class="bin"></span><span class="dec"></span>';
+        cell.appendChild(tile);
+      } else if(Number(tile.dataset.v) === v){
+        continue;                                  // unchanged: leave the DOM alone
+      }
+      tile.dataset.v = String(v);
+      tile.querySelector('.bin').textContent = v.toString(2).padStart(8,'0');
+      tile.querySelector('.dec').textContent = v;
+      tile.style.background = colorFor(v);
+      tile.className = 'tile'
+        + (popcount(v) >= 5 ? ' dense' : '')
+        + (lastChanged.has(key) ? ' merged' : ' spawned');
+    }
+  }
+
+  document.getElementById('score').textContent = score;
+  document.getElementById('moves').textContent = moves;
+  document.getElementById('bestv').textContent = best;
+}
+
+/* ---------- viewport ---------- */
+// dvh is wrong inside some embedded/fullscreen iframes (itch.io on Android),
+// so trust visualViewport when it is available.
+function syncHeight(){
+  const vv = window.visualViewport;
+  if(!vv) return;
+  document.documentElement.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+}
+if(window.visualViewport){
+  visualViewport.addEventListener('resize', syncHeight);
+  visualViewport.addEventListener('scroll', syncHeight);
+}
+window.addEventListener('orientationchange', () => setTimeout(syncHeight, 120));
+syncHeight();
+
+/* ---------- modal ---------- */
+const modalEl = document.getElementById('modal');
+const helpBtn = document.getElementById('help');
+const closeBtn = document.getElementById('close');
+const modalOpen = () => modalEl.classList.contains('open');
+let lastFocus = null;
+
+function openModal(){
+  lastFocus = document.activeElement;
+  modalEl.classList.add('open');
+  modalEl.setAttribute('aria-hidden', 'false');
+  closeBtn.focus();
+}
+function closeModal(){
+  modalEl.classList.remove('open');
+  modalEl.setAttribute('aria-hidden', 'true');
+  (lastFocus === closeBtn ? helpBtn : lastFocus || helpBtn).focus();
+  lastFocus = null;
+}
+
+/* ---------- input ---------- */
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && modalOpen()){ e.preventDefault(); closeModal(); return; }
+  if(modalOpen()) return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  const map = {
+    ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
+    a:'left', d:'right', w:'up', s:'down'
+  };
+  // Normalize so Shift/Caps Lock don't break WASD.
+  const dir = map[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  if(dir){ e.preventDefault(); move(dir); }
+});
+
+document.querySelectorAll('.dpad button').forEach(b => {
+  b.addEventListener('click', () => move(b.dataset.dir));
+});
+
+const SWIPE_MIN = 24;
+let tx = 0, ty = 0, swiping = false;
+document.addEventListener('touchstart', e => {
+  // The modal is a full-viewport overlay; while it is open every touch is its own.
+  // Multi-touch is a pinch-zoom, not a swipe.
+  swiping = !modalOpen() && e.touches.length === 1 && !e.target.closest('button');
+  if(!swiping) return;
+  tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+}, {passive:true});
+document.addEventListener('touchmove', e => {
+  if(e.touches.length > 1) swiping = false;   // became a pinch
+}, {passive:true});
+document.addEventListener('touchend', e => {
+  if(!swiping) return;
+  swiping = false;
+  if(modalOpen()) return;
+  const dx = e.changedTouches[0].clientX - tx;
+  const dy = e.changedTouches[0].clientY - ty;
+  if(Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN) return;
+  if(Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left');
+  else move(dy > 0 ? 'down' : 'up');
+}, {passive:true});
+document.addEventListener('touchcancel', () => { swiping = false; }, {passive:true});
+
+document.getElementById('newgame').addEventListener('click', startNormalGame);
+document.getElementById('skip').addEventListener('click', () => {
+  store.set(TUT_KEY, 'done');
+  startNormalGame();
+});
+helpBtn.addEventListener('click', openModal);
+closeBtn.addEventListener('click', closeModal);
+document.getElementById('replay').addEventListener('click', () => { closeModal(); startTutorial(); });
+modalEl.addEventListener('click', e => { if(e.target.id === 'modal') closeModal(); });
+
+// Phones evict backgrounded tabs aggressively; persist on the way out too.
+document.addEventListener('visibilitychange', () => { if(document.hidden) saveGame(); });
+window.addEventListener('pagehide', saveGame);
+
+/* ---------- install prompt (Android/Chromium; iOS uses Share → Add to Home Screen) ---------- */
+let deferredPrompt = null;
+const installBtn = document.getElementById('install');
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.hidden = false;
+});
+installBtn.addEventListener('click', async () => {
+  if(!deferredPrompt) return;
+  installBtn.hidden = true;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice.catch(() => {});
+  deferredPrompt = null;
+});
+window.addEventListener('appinstalled', () => { installBtn.hidden = true; deferredPrompt = null; });
+
+/* ---------- service worker (offline play when self-hosted) ---------- */
+if('serviceWorker' in navigator && location.protocol === 'https:'){
+  window.addEventListener('load', () => {
+    // Fails harmlessly inside sandboxed embeds such as itch.io's iframe.
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+/* ---------- boot ---------- */
+best = Number(store.get(BEST_KEY)) || 0;
+if(loadGame()){
+  render();
+  if(won) setMsg('🎉 11111111 forged. Keep going?', 'win');
+} else if(store.get(TUT_KEY) === 'done'){
+  startNormalGame();
+} else {
+  startTutorial();
+}
+</script>
+</body>
+</html>
