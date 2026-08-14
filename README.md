@@ -63,7 +63,7 @@ manifest.webmanifest    PWA metadata (installable to a phone home screen)
 sw.js                   service worker, offline shell cache
 icons/                  generated app icons — do not hand-edit
 tools/make-icons.mjs    icon generator (no dependencies; run with node)
-tools/build-itch.sh     produces dist/xor2048-itch.zip
+tools/build-itch.sh     produces dist/site/ and dist/xor2048-itch.zip
 ```
 
 Regenerate icons after changing the generator:
@@ -93,7 +93,7 @@ The game is built phone-first and is tested down to a 320×568 viewport:
 ## Publishing to itch.io
 
 ```sh
-./tools/build-itch.sh      # writes dist/xor2048-itch.zip
+./tools/build-itch.sh      # writes dist/site/ and dist/xor2048-itch.zip
 ```
 
 Upload that zip, then in the project's edit page:
@@ -117,10 +117,16 @@ regardless of the desktop embed setting.
 
 itch.io serves games from a sandboxed iframe on a separate origin, so the manifest and
 service worker are ignored there — the game runs fine, it just is not installable from
-an itch.io page. For an installable, offline-capable copy, host the files anywhere with
-HTTPS. The included workflow deploys to GitHub Pages on every push to `main` and enables
-Pages itself on first run, so no manual setup is needed. Note that Pages on a *private*
-repository requires a paid plan; on a public repository it is free.
+an itch.io page. For an installable, offline-capable copy, serve the files from any
+HTTPS origin.
+
+The quickest route needs no repository integration and no CI:
+
+1. `./tools/build-itch.sh`
+2. Drag `dist/site/` onto <https://app.netlify.com/drop>
+
+That returns an HTTPS URL immediately. Any static host works the same way — the game is
+a handful of files with relative paths, so it runs from a subdirectory too.
 
 From that URL:
 
