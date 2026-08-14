@@ -1,4 +1,4 @@
-# XOR-2048 · Binary Merge
+# BitForge · XOR 255
 
 A 2048-style puzzle where every tile is an **8-bit number** and colliding tiles **XOR**
 instead of adding. Equal bits cancel, different bits combine. The goal is to forge the
@@ -64,7 +64,7 @@ manifest.webmanifest    PWA metadata (installable to a phone home screen)
 sw.js                   service worker, offline shell cache
 icons/                  generated app icons — do not hand-edit
 tools/make-icons.mjs    icon generator (no dependencies; run with node)
-tools/build-itch.sh     produces dist/site/ and dist/xor2048-itch.zip
+tools/build-itch.sh     produces dist/site/ and dist/bitforge-itch.zip
 ```
 
 Regenerate icons after changing the generator:
@@ -94,7 +94,7 @@ The game is built phone-first and is tested down to a 320×568 viewport:
 ## Publishing to itch.io
 
 ```sh
-./tools/build-itch.sh      # writes dist/site/ and dist/xor2048-itch.zip
+./tools/build-itch.sh      # writes dist/site/ and dist/bitforge-itch.zip
 ```
 
 Upload that zip, then in the project's edit page:

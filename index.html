@@ -11,11 +11,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="XOR-2048">
+<meta name="apple-mobile-web-app-title" content="BitForge">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>XOR-2048 · Binary Merge</title>
+<title>BitForge · XOR 255</title>
 <style>
   :root{
     --bg:#0b0e14; --panel:#121722; --cell:#1a2130; --text:#e6edf3;
@@ -228,7 +228,7 @@
 </head>
 <body>
   <div class="topbar">
-    <h1>XOR<span>-2048</span></h1>
+    <h1>Bit<span>Forge</span></h1>
     <div class="acts">
       <button id="install" hidden>Install</button>
       <button id="newgame">New</button>
@@ -988,7 +988,7 @@ function applyModeChrome(){
   for(const m of MODES){
     document.getElementById('mode-' + m).setAttribute('aria-pressed', String(m === mode));
   }
-  document.title = mode === 'gate' ? 'XOR-2048 · Gate rules' : 'XOR-2048 · Binary Merge';
+  document.title = mode === 'gate' ? 'BitForge · Gate rules' : 'BitForge · XOR 255';
 }
 
 function bootMode(){
