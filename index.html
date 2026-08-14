@@ -21,6 +21,9 @@
     --bg:#0b0e14; --panel:#121722; --cell:#1a2130; --text:#e6edf3;
     --accent:#3fb6ff; --gold:#ffd166; --dim:#8b98ab; --edge:#232b3d;
     --gap:clamp(5px, 1.6vmin, 10px);
+    /* Tile travel time. SLIDE_MS in the script mirrors this — it decides when the
+       merged result replaces the two tiles that produced it. */
+    --slide:.12s;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 
@@ -88,9 +91,10 @@
     touch-action:none;
     container-type:size;   /* lets the board size off this box in both axes */
   }
+  /* The board is a plain block so the absolutely-positioned tile layer resolves
+     against its padding box; #cells only draws the empty slots underneath. */
   #board{
-    display:grid; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr);
-    gap:var(--gap); background:var(--panel); padding:var(--gap);
+    position:relative; background:var(--panel); padding:var(--gap);
     border-radius:14px; border:1px solid var(--edge);
     /* A definite width makes height follow from aspect-ratio, but max-height then
        clamps height without shrinking width. Taking the min of both container axes
@@ -98,25 +102,52 @@
     width:min(100cqw, 100cqh, 480px);
     aspect-ratio:1;
   }
+  #cells{
+    display:grid; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr);
+    gap:var(--gap); width:100%; height:100%;
+  }
   .cell{
-    background:var(--cell); border-radius:8px; position:relative; min-width:0; min-height:0;
+    background:var(--cell); border-radius:8px; min-width:0; min-height:0;
     transition:box-shadow .15s;
   }
   .cell.hl{ box-shadow:0 0 0 3px var(--accent), 0 0 18px rgba(63,182,255,.5); }
+
+  /* Tiles live on their own layer rather than inside cells, so they can travel
+     between slots. #layer's inset matches the board padding, which puts it exactly
+     over #cells. */
+  #layer{ position:absolute; inset:var(--gap); }
   .tile{
-    position:absolute; inset:clamp(2px,.8vmin,4px); border-radius:6px;
+    position:absolute; top:0; left:0;
+    /* Tile size == cell size, so a translate of 100% is exactly one column. */
+    width:calc((100% - 3 * var(--gap)) / 4);
+    height:calc((100% - 3 * var(--gap)) / 4);
+    translate:calc(var(--x) * (100% + var(--gap))) calc(var(--y) * (100% + var(--gap)));
+    transition:translate var(--slide) cubic-bezier(.22,.7,.3,1);
+    border-radius:8px;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     box-shadow:0 0 0 1px rgba(255,255,255,.05) inset;
     container-type:size;   /* tile text scales with the board, not the viewport */
   }
+  /* pop/merge use the `scale` property, not `transform`, so they compose with the
+     `translate` the slide is animating instead of clobbering it. */
   .tile.spawned{ animation:pop .13s ease-out; }
   .tile.merged{ animation:merge .2s ease-out; }
   .tile .bin{ font-size:clamp(7px, 14cqmin, 13px); letter-spacing:.5px; opacity:.9; }
   .tile .dec{ font-size:clamp(13px, 30cqmin, 26px); font-weight:700; line-height:1; margin-top:2px; }
   .tile.dense{ color:#0b0e14; }
-  @keyframes pop{ from{ transform:scale(.6); opacity:0; } to{ transform:scale(1); opacity:1; } }
-  @keyframes merge{ 0%{ transform:scale(.82); } 60%{ transform:scale(1.08); } 100%{ transform:scale(1); } }
+  @keyframes pop{ from{ scale:.6; opacity:0; } to{ scale:1; opacity:1; } }
+  @keyframes merge{ 0%{ scale:.82; } 60%{ scale:1.08; } 100%{ scale:1; } }
+  /* Pre-2022 engines lack the independent transform properties; fall back to a
+     static transform and no animation rather than piling every tile at 0,0. */
+  @supports not (translate: 0px 0px){
+    .tile{
+      transform:translate(calc(var(--x) * (100% + var(--gap))), calc(var(--y) * (100% + var(--gap))));
+      transition:none;
+    }
+    .tile.spawned, .tile.merged{ animation:none; }
+  }
   @media (prefers-reduced-motion:reduce){
+    .tile{ transition:none; }
     .tile.spawned, .tile.merged{ animation:none; }
     .cell{ transition:none; }
   }
@@ -218,7 +249,7 @@
     <button class="skip" id="skip">skip tutorial →</button>
   </div>
 
-  <div id="stage"><div id="board"></div></div>
+  <div id="stage"><div id="board"><div id="cells"></div><div id="layer"></div></div></div>
   <div id="msg" role="status" aria-live="polite"></div>
 
   <div class="legend" id="legend"></div>
@@ -457,55 +488,79 @@ function setLines(dir, lines){
 // on a block only the leading tile settles, so the follower is reconsidered
 // against whatever comes next.
 function mergeLine(line){
-  const tiles = line.filter(v => v !== 0);
+  // Positions are carried along so the animation knows which slot each tile came
+  // from — the pairing is invisible in the result otherwise.
+  const tiles = [];
+  for(let j = 0; j < line.length; j++) if(line[j] !== 0) tiles.push({ v: line[j], j });
+
   const out = [];
   const mergedAt = [];   // output indices produced by a merge, for the flash
+  const moves = [];      // {from, to, gone} per source tile, for the slide
   let gained = 0, forged = 0;
   let i = 0;
   while(i < tiles.length){
     const a = tiles[i];
-    if(i + 1 >= tiles.length){ out.push(a); i += 1; continue; }
+    const slot = out.length;   // where this step's result lands
+    if(i + 1 >= tiles.length){
+      moves.push({ from: a.j, to: slot, gone: false });
+      out.push(a.v); i += 1; continue;
+    }
     const b = tiles[i+1];
 
     if(mode === 'xor'){
-      const m = a ^ b;
-      if(m !== 0){ mergedAt.push(out.length); out.push(m); gained += popcount(m); }
+      const m = a.v ^ b.v;
+      // Both sources are consumed either way: they travel to the same slot and are
+      // replaced by their result, or by nothing when they cancel.
+      moves.push({ from: a.j, to: slot, gone: true });
+      moves.push({ from: b.j, to: slot, gone: true });
+      if(m !== 0){ mergedAt.push(slot); out.push(m); gained += popcount(m); }
       i += 2;
       continue;
     }
 
-    if(a === b){                        // equal → annihilate, the pressure valve
-      gained += popcount(a) * 2;
+    if(a.v === b.v){                    // equal → annihilate, the pressure valve
+      moves.push({ from: a.j, to: slot, gone: true });
+      moves.push({ from: b.j, to: slot, gone: true });
+      gained += popcount(a.v) * 2;
       i += 2;
-    } else if((a & b) === 0){           // disjoint → combine
-      const m = a | b;
-      mergedAt.push(out.length);
+    } else if((a.v & b.v) === 0){       // disjoint → combine
+      const m = a.v | b.v;
+      mergedAt.push(slot);
+      moves.push({ from: a.j, to: slot, gone: true });
+      moves.push({ from: b.j, to: slot, gone: true });
       out.push(m);
       gained += popcount(m) * popcount(m);
       if(m === 255) forged++;
       i += 2;
     } else {                            // overlap → block
-      out.push(a);
+      moves.push({ from: a.j, to: slot, gone: false });
+      out.push(a.v);
       i += 1;
     }
   }
   while(out.length < SIZE) out.push(0);
-  return { out, gained, mergedAt, forged };
+  return { out, gained, mergedAt, forged, moves };
 }
 
 function applyMove(dir){
   const before = grid.flat().join(',');
   let gained = 0, forged = 0;
   const merged = new Set();
+  const anim = [];
   const next = getLines(dir).map((l, i) => {
     const r = mergeLine(l);
     gained += r.gained;
     forged += r.forged || 0;
     for(const j of r.mergedAt){ const [rr,cc] = coord(dir, i, j); merged.add(rr+','+cc); }
+    for(const m of r.moves){
+      const [fr,fc] = coord(dir, i, m.from);
+      const [tr,tc] = coord(dir, i, m.to);
+      anim.push({ fromR:fr, fromC:fc, toR:tr, toC:tc, gone:m.gone });
+    }
     return r.out;
   });
   setLines(dir, next);
-  return { changed: grid.flat().join(',') !== before, gained, merged, forged };
+  return { changed: grid.flat().join(',') !== before, gained, merged, forged, anim };
 }
 
 // Gate mode can genuinely deadlock, so this has to be exact rather than a
@@ -522,6 +577,10 @@ function isStuck(){
 
 function move(dir){
   if(modalOpen() || over) return;
+  // A move arriving mid-slide snaps the previous one home rather than being
+  // dropped, so fast play stays responsive without queueing.
+  finishSlide();
+  if(tutorialHold) return;   // finishSlide may have just started the hold
 
   if(tutorial.active){
     const step = tutorialSteps()[tutorial.step];
@@ -533,8 +592,11 @@ function move(dir){
     if(!res.changed) return;
     lastChanged = res.merged;
     buzz(res.gained);
-    render();
-    if(step.check(grid)) advanceTutorial();
+    renderStats();
+    startSlide(res.anim, () => {
+      if(!step.check(grid)) return;
+      tutorialHold = setTimeout(() => { tutorialHold = 0; advanceTutorial(); }, TUTORIAL_HOLD_MS);
+    });
     return;
   }
 
@@ -547,7 +609,8 @@ function move(dir){
   if(score > best){ best = score; store.set(bestKey(), String(best)); }
   spawn();
   buzz(res.gained);
-  render();
+  renderStats();
+  startSlide(res.anim);
   checkMilestones(res.forged);
   saveGame();
 }
@@ -584,6 +647,7 @@ function advanceTutorial(){
 
 function loadTutorialStep(i){
   const s = tutorialSteps()[i];
+  cancelSlide();
   grid = s.board.map(r => r.slice());
   lastChanged = new Set();
   document.getElementById('prompt').hidden = false;
@@ -593,6 +657,7 @@ function loadTutorialStep(i){
 }
 
 function startTutorial(){
+  cancelSlide();
   tutorial = { active: true, step: 0 };
   won = false; over = false; score = 0; moves = 0; bytes = 0;
   store.del(saveKey());
@@ -601,6 +666,7 @@ function startTutorial(){
 }
 
 function startNormalGame(){
+  cancelSlide();
   grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
   score = 0; moves = 0; won = false; over = false; bytes = 0;
   lastChanged = new Set();
@@ -640,58 +706,151 @@ function colorFor(v){
   return `hsl(${hue}, 60%, ${50 + pc*3}%)`;
 }
 
-const board = document.getElementById('board');
+const cellsEl = document.getElementById('cells');
+const layerEl = document.getElementById('layer');
 const cells = [];
 for(let i=0;i<SIZE*SIZE;i++){
   const cell = document.createElement('div');
   cell.className = 'cell';
-  board.appendChild(cell);
+  cellsEl.appendChild(cell);
   cells.push(cell);
 }
 
-// Cells persist across renders; only tiles that actually changed re-animate,
-// so the board no longer flashes in full on every move.
-function render(){
-  const hlSet = tutorial.active
-    ? new Set(tutorialSteps()[tutorial.step].hl.map(p => p[0]+','+p[1]))
-    : null;
+/* The tile layer is keyed by id rather than by cell, so a tile keeps its element
+   while it travels. `grid` stays the single source of truth for the rules; idGrid
+   just records which element is currently showing which cell. */
+const SLIDE_MS = 120;           // keep in step with --slide in the stylesheet
+const TUTORIAL_HOLD_MS = 260;   // let the merge land before the next step replaces it
+const reduceMotion = () =>
+  !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
+let idGrid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
+const tileMap = new Map();      // id -> {el, v}
+let nextTileId = 1;
+let slide = null;               // in-flight slide, or null
+let tutorialHold = 0;
+
+function place(el, r, c){
+  el.style.setProperty('--x', c);
+  el.style.setProperty('--y', r);
+}
+
+function addTile(r, c, v, cls){
+  const el = document.createElement('div');
+  el.className = 'tile' + (popcount(v) >= 5 ? ' dense' : '') + (cls ? ' ' + cls : '');
+  el.innerHTML = '<span class="bin"></span><span class="dec"></span>';
+  el.querySelector('.bin').textContent = v.toString(2).padStart(8,'0');
+  el.querySelector('.dec').textContent = v;
+  el.style.background = colorFor(v);
+  place(el, r, c);          // set before insertion, so it does not slide in from 0,0
+  layerEl.appendChild(el);
+  const id = nextTileId++;
+  tileMap.set(id, { el, v });
+  idGrid[r][c] = id;
+}
+
+function dropTile(id){
+  const t = tileMap.get(id);
+  if(!t) return;
+  t.el.remove();
+  tileMap.delete(id);
+}
+
+function clearTiles(){
+  for(const id of [...tileMap.keys()]) dropTile(id);
+  idGrid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
+}
+
+// Brings the layer in line with `grid`. Tiles already showing the right value are
+// left alone, so nothing re-animates unless it actually changed.
+function syncTiles(){
   for(let r=0;r<SIZE;r++){
     for(let c=0;c<SIZE;c++){
-      const cell = cells[r*SIZE + c];
-      const key = r+','+c;
-      cell.classList.toggle('hl', !!(hlSet && hlSet.has(key)));
-
       const v = grid[r][c];
-      let tile = cell.firstElementChild;
-
-      if(v === 0){
-        if(tile) tile.remove();
-        continue;
+      const id = idGrid[r][c];
+      if(id && tileMap.get(id).v !== v){ dropTile(id); idGrid[r][c] = 0; }
+      if(!idGrid[r][c] && v !== 0){
+        addTile(r, c, v, lastChanged.has(r+','+c) ? 'merged' : 'spawned');
       }
-      if(!tile){
-        tile = document.createElement('div');
-        tile.innerHTML = '<span class="bin"></span><span class="dec"></span>';
-        cell.appendChild(tile);
-      } else if(Number(tile.dataset.v) === v){
-        continue;                                  // unchanged: leave the DOM alone
-      }
-      tile.dataset.v = String(v);
-      tile.querySelector('.bin').textContent = v.toString(2).padStart(8,'0');
-      tile.querySelector('.dec').textContent = v;
-      tile.style.background = colorFor(v);
-      tile.className = 'tile'
-        + (popcount(v) >= 5 ? ' dense' : '')
-        + (lastChanged.has(key) ? ' merged' : ' spawned');
     }
   }
+}
 
+/* A move is shown in two beats: every tile travels to the slot the rules gave it,
+   then the layer is reconciled — consumed pairs are removed, their result pops in,
+   and the new spawn appears. Without the first beat there is nothing on screen to
+   say which two tiles paired off, which is the whole problem under XOR rules where
+   every pair merges. */
+function startSlide(anim, done){
+  const from = idGrid;
+  const to = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
+  const dying = [];
+  const moved = new Set();
+
+  for(const m of anim){
+    const id = from[m.fromR][m.fromC];
+    if(!id) continue;
+    moved.add(id);
+    place(tileMap.get(id).el, m.toR, m.toC);
+    if(m.gone) dying.push(id);
+    else to[m.toR][m.toC] = id;
+  }
+  // Nothing should be left over, but a stray element would be orphaned forever.
+  for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++){
+    const id = from[r][c];
+    if(id && !moved.has(id)) dying.push(id);
+  }
+
+  idGrid = to;
+  slide = { dying, done, timer: 0 };
+  if(reduceMotion()) finishSlide();
+  else slide.timer = setTimeout(finishSlide, SLIDE_MS);
+}
+
+function finishSlide(){
+  if(!slide) return;
+  const { dying, done, timer } = slide;
+  slide = null;
+  clearTimeout(timer);
+  for(const id of dying) dropTile(id);
+  syncTiles();
+  if(done) done();
+}
+
+// Called before anything that replaces the board outright; unlike finishSlide it
+// does not run the completion callback, which would advance a tutorial step.
+function cancelSlide(){
+  if(slide){
+    clearTimeout(slide.timer);
+    for(const id of slide.dying) dropTile(id);
+    slide = null;
+  }
+  clearTimeout(tutorialHold);
+  tutorialHold = 0;
+}
+
+function renderStats(){
   document.getElementById('score').textContent = score;
   document.getElementById('moves').textContent = moves;
   document.getElementById('bestv').textContent = best;
   // Gate mode has no target to display, so the slot tracks forged bytes instead.
   document.getElementById('goalk').textContent = mode === 'gate' ? 'Bytes' : 'Goal';
   document.getElementById('goalv').textContent = mode === 'gate' ? bytes : '11111111';
+}
+
+// Full, non-animated refresh — for boot, new games and tutorial steps, where the
+// board is replaced rather than moved.
+function render(){
+  const hlSet = tutorial.active
+    ? new Set(tutorialSteps()[tutorial.step].hl.map(p => p[0]+','+p[1]))
+    : null;
+  for(let r=0;r<SIZE;r++){
+    for(let c=0;c<SIZE;c++){
+      cells[r*SIZE + c].classList.toggle('hl', !!(hlSet && hlSet.has(r+','+c)));
+    }
+  }
+  syncTiles();
+  renderStats();
 }
 
 /* ---------- viewport ---------- */
@@ -833,6 +992,9 @@ function applyModeChrome(){
 }
 
 function bootMode(){
+  cancelSlide();
+  clearTiles();              // the outgoing rule set's board is not this one's
+  lastChanged = new Set();   // no merge flash on a board we are only restoring
   best = Number(store.get(bestKey())) || 0;
   applyModeChrome();
   if(loadGame()){

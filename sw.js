@@ -1,6 +1,6 @@
 /* Offline shell for XOR-2048.
    Bump CACHE when any precached file changes — the old cache is dropped on activate. */
-const CACHE = 'xor2048-v1';
+const CACHE = 'xor2048-v2';
 
 const SHELL = [
   './',
