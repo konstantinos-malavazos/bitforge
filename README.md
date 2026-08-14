@@ -20,6 +20,41 @@ can never deadlock.
 
 Controls: swipe, arrow keys, WASD, or the on-screen D-pad.
 
+## Rule sets
+
+Two rule sets ship side by side. Pick one with the toggle in the How-to-play dialog, or
+with `?rules=xor` / `?rules=gate`. Saved games, best scores and tutorial progress are
+tracked separately per rule set, so switching never destroys the other's run.
+
+**`xor`** (default) — the original. Every adjacent pair merges, unconditionally.
+
+**`gate`** (prototype) — collisions have three outcomes:
+
+| Collision | Rule | Role |
+|---|---|---|
+| No shared bits (`a & b == 0`) | combine → `a\|b`, score `popcount²` | the build move |
+| Equal tiles (`a == b`) | annihilate, score `popcount × 2` | the pressure valve |
+| Any shared bit | **block** | what fills the board |
+
+Blocking is the whole point: it is the only thing that lets the board fill, which is what
+makes a lose state possible. Two consequences fall out of the rules rather than being
+written in — a forged `11111111` overlaps every other tile, so it becomes a wall that only
+a second `11111111` can clear; and the game ends when no direction produces a legal move.
+Gate mode also uses a flat spawn table, because the skewed one starves high bits.
+
+Measured over 200 in-browser games under random play:
+
+| | `xor` | `gate` |
+|---|---|---|
+| Games that end | 0% | **100%** |
+| Median length | never | 81 moves |
+| Average occupancy | 3–4 / 16 | **10.1 / 16** |
+| Peak occupancy | 5 / 16 (bound: 9) | 16 / 16 |
+
+Under 1-ply greedy play in the offline simulator, `gate` scores 1408 median against 976
+for random — so direction choice is worth about 44%, where the original's outcome is
+mostly determined by the spawn sequence.
+
 ## Layout
 
 ```
@@ -83,8 +118,9 @@ regardless of the desktop embed setting.
 itch.io serves games from a sandboxed iframe on a separate origin, so the manifest and
 service worker are ignored there — the game runs fine, it just is not installable from
 an itch.io page. For an installable, offline-capable copy, host the files anywhere with
-HTTPS. The included workflow deploys to GitHub Pages on every push to `main`; enable it
-under **Settings → Pages → Source: GitHub Actions**.
+HTTPS. The included workflow deploys to GitHub Pages on every push to `main` and enables
+Pages itself on first run, so no manual setup is needed. Note that Pages on a *private*
+repository requires a paid plan; on a public repository it is free.
 
 From that URL:
 

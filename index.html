@@ -193,6 +193,14 @@
   .card li{ margin-bottom:7px; }
   .card .mono{ color:var(--accent); }
   .card .row{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+  .modeswitch{ display:flex; gap:8px; align-items:center; padding-top:4px;
+               border-top:1px solid var(--edge); }
+  .modeswitch .k{ font-size:10px; letter-spacing:2px; color:var(--dim);
+                  text-transform:uppercase; margin-right:auto; }
+  .modeswitch button[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent); }
+  .card .note{ margin:0; font-size:12px; color:var(--dim); line-height:1.45; }
+  #rules-xor[hidden], #rules-gate[hidden]{ display:none; }
+  #msg.over{ color:var(--gold); font-weight:700; }
 </style>
 </head>
 <body>
@@ -208,7 +216,7 @@
   <div class="bar">
     <div class="stat"><div class="k">Score</div><div class="v" id="score">0</div></div>
     <div class="stat" id="best"><div class="k">Best</div><div class="v" id="bestv">0</div></div>
-    <div class="stat" id="goal"><div class="k">Goal</div><div class="v">11111111</div></div>
+    <div class="stat" id="goal"><div class="k" id="goalk">Goal</div><div class="v" id="goalv">11111111</div></div>
     <div class="stat"><div class="k">Moves</div><div class="v" id="moves">0</div></div>
   </div>
 
@@ -228,15 +236,13 @@
     <button class="right" data-dir="right" aria-label="Move right">▶</button>
   </div>
 
-  <div class="legend">
-    Swipe or use <b>arrow keys / WASD</b>. Colliding tiles <b>XOR</b>: equal bits cancel,
-    different bits combine. Equal tiles vanish to <b>0</b>. Forge <b>11111111</b> (255).
-  </div>
+  <div class="legend" id="legend"></div>
 
   <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
     <div class="card">
       <h2 id="modal-title">How to play</h2>
-      <ul>
+
+      <ul id="rules-xor">
         <li>Every tile is an <span class="mono">8-bit number</span> (shown as binary + decimal).</li>
         <li>Swiping slides tiles; when two collide they <span class="mono">XOR</span>:
           <br><span class="mono">0010 ^ 0100 = 0110</span> — different bits combine.</li>
@@ -245,6 +251,28 @@
         <li>Goal: forge the full register <span class="mono">11111111 = 255</span>.</li>
         <li>Score = total bits set on merges. No lose state — it's a puzzle, take your time.</li>
       </ul>
+
+      <ul id="rules-gate">
+        <li>Every tile is an <span class="mono">8-bit number</span>. Collisions have three outcomes.</li>
+        <li><b>No shared bits → combine.</b>
+          <br><span class="mono">0010 | 0100 = 0110</span>. Score is the new tile's bit count, squared.</li>
+        <li><b>Equal tiles → annihilate.</b>
+          <br><span class="mono">0011 + 0011 = gone</span> — your only way to clear a jam.</li>
+        <li><b>Any shared bit → block.</b>
+          <br><span class="mono">0110</span> and <span class="mono">0011</span> both hold bit 2, so they
+          stop dead against each other. This is what fills the board.</li>
+        <li>A forged <span class="mono">11111111</span> overlaps everything, so it is a wall.
+          The only thing that clears it is a second one.</li>
+        <li>No goal — play for score. The board fills, and you lose when nothing can move.</li>
+      </ul>
+
+      <div class="modeswitch">
+        <span class="k">Rules</span>
+        <button id="mode-xor" data-mode="xor">XOR</button>
+        <button id="mode-gate" data-mode="gate">Gate</button>
+      </div>
+      <p class="note" id="mode-note"></p>
+
       <div class="row">
         <button class="ghost" id="replay">Replay tutorial</button>
         <button id="close">Got it</button>
@@ -254,11 +282,24 @@
 
 <script>
 const SIZE = 4;
-const SAVE_KEY = 'xor2048.save.v1';
-const BEST_KEY = 'xor2048.best.v1';
-const TUT_KEY  = 'xor2048.tutorial.v1';
 
-let grid, score, moves, won, best = 0;
+/* Two rule sets live side by side so they can be compared without a rebuild.
+   'xor'  — the original: every adjacent pair merges, unconditionally.
+   'gate' — prototype: disjoint bits combine, equal tiles annihilate, any
+            overlap BLOCKS. The blocking is what fills the board and makes a
+            lose state possible at all; under 'xor' the board tops out at nine
+            tiles and can never jam.
+   Select with ?rules=gate, or the toggle in the How-to-play dialog. */
+const MODES = ['xor', 'gate'];
+let mode = 'xor';
+
+// Saves are per-mode: the two rule sets produce incompatible positions.
+const saveKey = () => `xor2048.save.${mode}.v2`;
+const bestKey = () => `xor2048.best.${mode}.v2`;
+const tutKey  = () => `xor2048.tutorial.${mode}.v2`;
+const MODE_KEY = 'xor2048.mode.v2';
+
+let grid, score, moves, won, over, bytes, best = 0;
 let tutorial = { active: false, step: 0 };
 let lastChanged = new Set();   // cells that merged on the last move, for the merge flash
 
@@ -271,10 +312,10 @@ const store = {
 
 function saveGame(){
   if(tutorial.active) return;
-  store.set(SAVE_KEY, JSON.stringify({ grid, score, moves, won }));
+  store.set(saveKey(), JSON.stringify({ grid, score, moves, won, over, bytes }));
 }
 function loadGame(){
-  const raw = store.get(SAVE_KEY);
+  const raw = store.get(saveKey());
   if(!raw) return false;
   try {
     const s = JSON.parse(raw);
@@ -284,13 +325,17 @@ function loadGame(){
     grid = s.grid.map(r => r.slice());
     score = Number(s.score) || 0;
     moves = Number(s.moves) || 0;
+    bytes = Number(s.bytes) || 0;
     won = !!s.won;
+    over = !!s.over;
     return true;
   } catch { return false; }
 }
 
 /* ---------- rules ---------- */
-const TUTORIAL = [
+const TUTORIALS = {};
+
+TUTORIALS.xor = [
   {
     title: 'Step 1 of 4 · XOR merge',
     text: 'Tiles are binary. When two collide, they XOR. Swipe <b>LEFT</b> to merge 0010 and 0100 into 0110.',
@@ -325,9 +370,54 @@ const TUTORIAL = [
   }
 ];
 
+TUTORIALS.gate = [
+  {
+    title: 'Step 1 of 4 · Disjoint bits combine',
+    text: 'Two tiles merge only when they share no bits. <span class="mono">0010</span> and '
+        + '<span class="mono">0100</span> are disjoint. Swipe <b>LEFT</b>.',
+    dir: 'left',
+    board: [[2,4,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g[0][0] === 6
+  },
+  {
+    title: 'Step 2 of 4 · Shared bits block',
+    text: '<span class="mono">0110</span> and <span class="mono">0011</span> both hold bit 2, so they '
+        + 'refuse to merge and stack up instead. Swipe <b>LEFT</b> and watch them jam.',
+    dir: 'left',
+    board: [[6,0,3,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,2]],
+    check: g => g[0][0] === 6 && g[0][1] === 3
+  },
+  {
+    title: 'Step 3 of 4 · Equal tiles annihilate',
+    text: 'Identical tiles cancel out completely — your only way to unjam a crowded board. '
+        + 'Swipe <b>LEFT</b>.',
+    dir: 'left',
+    board: [[3,0,3,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,2]],
+    check: g => g[0][0] === 0 && g[0][1] === 0
+  },
+  {
+    title: 'Step 4 of 4 · A full byte is a wall',
+    text: '<span class="mono">11111110</span> and <span class="mono">00000001</span> are disjoint, so they '
+        + 'forge <span class="mono">11111111</span>. It now overlaps every tile — only a second one clears it. '
+        + 'Swipe <b>LEFT</b>.',
+    dir: 'left',
+    board: [[254,1,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0],[0,1]],
+    check: g => g.flat().includes(255)
+  }
+];
+
+const tutorialSteps = () => TUTORIALS[mode];
+
 function popcount(n){ let c=0; while(n){ c += n&1; n >>= 1; } return c; }
 
 function randomTile(){
+  // Gate mode uses a flat table. The skewed one below starves high bits, and
+  // under conditional merges that drops 255s from 87% of runs to 14%.
+  if(mode === 'gate') return 1 << (Math.random() * 8 | 0);
   const r = Math.random();
   let k;
   if(r < .40) k = 0;
@@ -378,44 +468,78 @@ function setLines(dir, lines){
   }
 }
 
+// Advancing i by 2 on a merge is what stops a tile merging twice in one move;
+// on a block only the leading tile settles, so the follower is reconsidered
+// against whatever comes next.
 function mergeLine(line){
   const tiles = line.filter(v => v !== 0);
   const out = [];
   const mergedAt = [];   // output indices produced by a merge, for the flash
-  let gained = 0;
+  let gained = 0, forged = 0;
   let i = 0;
   while(i < tiles.length){
-    if(i + 1 < tiles.length){
-      const m = tiles[i] ^ tiles[i+1];
+    const a = tiles[i];
+    if(i + 1 >= tiles.length){ out.push(a); i += 1; continue; }
+    const b = tiles[i+1];
+
+    if(mode === 'xor'){
+      const m = a ^ b;
       if(m !== 0){ mergedAt.push(out.length); out.push(m); gained += popcount(m); }
       i += 2;
-    } else {
-      out.push(tiles[i]); i += 1;
+      continue;
+    }
+
+    if(a === b){                        // equal → annihilate, the pressure valve
+      gained += popcount(a) * 2;
+      i += 2;
+    } else if((a & b) === 0){           // disjoint → combine
+      const m = a | b;
+      mergedAt.push(out.length);
+      out.push(m);
+      gained += popcount(m) * popcount(m);
+      if(m === 255) forged++;
+      i += 2;
+    } else {                            // overlap → block
+      out.push(a);
+      i += 1;
     }
   }
   while(out.length < SIZE) out.push(0);
-  return { out, gained, mergedAt };
+  return { out, gained, mergedAt, forged };
 }
 
 function applyMove(dir){
   const before = grid.flat().join(',');
-  let gained = 0;
+  let gained = 0, forged = 0;
   const merged = new Set();
   const next = getLines(dir).map((l, i) => {
     const r = mergeLine(l);
     gained += r.gained;
+    forged += r.forged || 0;
     for(const j of r.mergedAt){ const [rr,cc] = coord(dir, i, j); merged.add(rr+','+cc); }
     return r.out;
   });
   setLines(dir, next);
-  return { changed: grid.flat().join(',') !== before, gained, merged };
+  return { changed: grid.flat().join(',') !== before, gained, merged, forged };
+}
+
+// Gate mode can genuinely deadlock, so this has to be exact rather than a
+// "board is full" heuristic: a full board may still have a legal merge.
+function isStuck(){
+  const saved = grid.map(r => r.slice());
+  for(const d of ['left','right','up','down']){
+    const changed = applyMove(d).changed;
+    grid = saved.map(r => r.slice());
+    if(changed) return false;
+  }
+  return true;
 }
 
 function move(dir){
-  if(modalOpen()) return;
+  if(modalOpen() || over) return;
 
   if(tutorial.active){
-    const step = TUTORIAL[tutorial.step];
+    const step = tutorialSteps()[tutorial.step];
     if(dir !== step.dir){
       setMsg('Try swiping ' + step.dir.toUpperCase() + '.', 'nudge');
       return;
@@ -433,12 +557,13 @@ function move(dir){
   if(!res.changed) return;
   lastChanged = res.merged;
   score += res.gained;
+  bytes += res.forged;
   moves++;
-  if(score > best){ best = score; store.set(BEST_KEY, String(best)); }
+  if(score > best){ best = score; store.set(bestKey(), String(best)); }
   spawn();
   buzz(res.gained);
   render();
-  checkWin();
+  checkMilestones(res.forged);
   saveGame();
 }
 
@@ -457,13 +582,15 @@ function setMsg(text, cls){
 
 function advanceTutorial(){
   tutorial.step++;
-  if(tutorial.step >= TUTORIAL.length){
+  if(tutorial.step >= tutorialSteps().length){
     tutorial.active = false;
     document.getElementById('prompt').hidden = true;
-    store.set(TUT_KEY, 'done');
+    store.set(tutKey(), 'done');
     // startNormalGame() clears #msg, so set the completion text after it runs.
     startNormalGame();
-    setMsg('Tutorial complete! Now forge 255 for real. 🎯', 'win');
+    setMsg(mode === 'gate'
+      ? 'Tutorial complete! Now play for score — the board fills up. 🎯'
+      : 'Tutorial complete! Now forge 255 for real. 🎯', 'win');
   } else {
     loadTutorialStep(tutorial.step);
     render();
@@ -471,7 +598,7 @@ function advanceTutorial(){
 }
 
 function loadTutorialStep(i){
-  const s = TUTORIAL[i];
+  const s = tutorialSteps()[i];
   grid = s.board.map(r => r.slice());
   lastChanged = new Set();
   document.getElementById('prompt').hidden = false;
@@ -482,15 +609,15 @@ function loadTutorialStep(i){
 
 function startTutorial(){
   tutorial = { active: true, step: 0 };
-  won = false; score = 0; moves = 0;
-  store.del(SAVE_KEY);
+  won = false; over = false; score = 0; moves = 0; bytes = 0;
+  store.del(saveKey());
   loadTutorialStep(0);
   render();
 }
 
 function startNormalGame(){
   grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
-  score = 0; moves = 0; won = false;
+  score = 0; moves = 0; won = false; over = false; bytes = 0;
   lastChanged = new Set();
   tutorial.active = false;
   document.getElementById('prompt').hidden = true;
@@ -500,12 +627,23 @@ function startNormalGame(){
   saveGame();
 }
 
-function checkWin(){
-  if(won) return;
-  if(grid.flat().some(v => v === 255)){
-    won = true;
-    setMsg('🎉 11111111 forged. Keep going?', 'win');
+function checkMilestones(forged){
+  if(mode === 'xor'){
+    if(won) return;
+    if(grid.flat().some(v => v === 255)){
+      won = true;
+      setMsg('🎉 11111111 forged. Keep going?', 'win');
+    }
+    return;
   }
+
+  // Gate mode has no win condition — it ends when the board jams.
+  if(isStuck()){
+    over = true;
+    setMsg(`Jammed after ${moves} moves. Score ${score}` + (bytes ? ` · ${bytes} byte${bytes>1?'s':''} forged` : '') + '.', 'over');
+    return;
+  }
+  if(forged) setMsg('11111111 forged (+' + 64 * forged + '). It blocks everything now — build another to clear it.', 'win');
 }
 
 /* ---------- rendering ---------- */
@@ -530,7 +668,7 @@ for(let i=0;i<SIZE*SIZE;i++){
 // so the board no longer flashes in full on every move.
 function render(){
   const hlSet = tutorial.active
-    ? new Set(TUTORIAL[tutorial.step].hl.map(p => p[0]+','+p[1]))
+    ? new Set(tutorialSteps()[tutorial.step].hl.map(p => p[0]+','+p[1]))
     : null;
 
   for(let r=0;r<SIZE;r++){
@@ -566,6 +704,9 @@ function render(){
   document.getElementById('score').textContent = score;
   document.getElementById('moves').textContent = moves;
   document.getElementById('bestv').textContent = best;
+  // Gate mode has no target to display, so the slot tracks forged bytes instead.
+  document.getElementById('goalk').textContent = mode === 'gate' ? 'Bytes' : 'Goal';
+  document.getElementById('goalv').textContent = mode === 'gate' ? bytes : '11111111';
 }
 
 /* ---------- viewport ---------- */
@@ -647,7 +788,7 @@ document.addEventListener('touchcancel', () => { swiping = false; }, {passive:tr
 
 document.getElementById('newgame').addEventListener('click', startNormalGame);
 document.getElementById('skip').addEventListener('click', () => {
-  store.set(TUT_KEY, 'done');
+  store.set(tutKey(), 'done');
   startNormalGame();
 });
 helpBtn.addEventListener('click', openModal);
@@ -684,16 +825,67 @@ if('serviceWorker' in navigator && location.protocol === 'https:'){
   });
 }
 
-/* ---------- boot ---------- */
-best = Number(store.get(BEST_KEY)) || 0;
-if(loadGame()){
-  render();
-  if(won) setMsg('🎉 11111111 forged. Keep going?', 'win');
-} else if(store.get(TUT_KEY) === 'done'){
-  startNormalGame();
-} else {
-  startTutorial();
+/* ---------- rule set switching ---------- */
+const LEGENDS = {
+  xor: 'Swipe or use <b>arrow keys / WASD</b>. Colliding tiles <b>XOR</b>: equal bits cancel, '
+     + 'different bits combine. Equal tiles vanish to <b>0</b>. Forge <b>11111111</b> (255).',
+  gate: 'Swipe or use <b>arrow keys / WASD</b>. Tiles combine only if they share <b>no bits</b>; '
+      + 'equal tiles <b>annihilate</b>; any overlap <b>blocks</b>. Play for score — the board fills up.',
+};
+const MODE_NOTES = {
+  xor: 'Original rules. Every collision merges, so the board never holds more than nine tiles '
+     + 'and cannot be lost.',
+  gate: 'Prototype. Overlapping tiles block instead of merging, which fills the board and makes '
+      + 'a lose state possible. Uses a flat spawn table. Progress and best score are tracked '
+      + 'separately per rule set.',
+};
+
+function applyModeChrome(){
+  document.getElementById('legend').innerHTML = LEGENDS[mode];
+  document.getElementById('mode-note').textContent = MODE_NOTES[mode];
+  document.getElementById('rules-xor').hidden = mode !== 'xor';
+  document.getElementById('rules-gate').hidden = mode !== 'gate';
+  for(const m of MODES){
+    document.getElementById('mode-' + m).setAttribute('aria-pressed', String(m === mode));
+  }
+  document.title = mode === 'gate' ? 'XOR-2048 · Gate rules' : 'XOR-2048 · Binary Merge';
 }
+
+function bootMode(){
+  best = Number(store.get(bestKey())) || 0;
+  applyModeChrome();
+  if(loadGame()){
+    render();
+    if(over) setMsg(`Jammed after ${moves} moves. Score ${score}.`, 'over');
+    else if(won && mode === 'xor') setMsg('🎉 11111111 forged. Keep going?', 'win');
+  } else if(store.get(tutKey()) === 'done'){
+    startNormalGame();
+  } else {
+    startTutorial();
+  }
+}
+
+function setMode(next){
+  if(!MODES.includes(next) || next === mode) return;
+  saveGame();                       // keep the outgoing rule set's position
+  mode = next;
+  store.set(MODE_KEY, mode);
+  tutorial.active = false;
+  document.getElementById('prompt').hidden = true;
+  bootMode();
+}
+
+for(const m of MODES){
+  document.getElementById('mode-' + m).addEventListener('click', () => setMode(m));
+}
+
+/* ---------- boot ---------- */
+const urlMode = new URLSearchParams(location.search).get('rules');
+mode = MODES.includes(urlMode) ? urlMode
+     : MODES.includes(store.get(MODE_KEY)) ? store.get(MODE_KEY)
+     : 'xor';
+if(urlMode) store.set(MODE_KEY, mode);
+bootMode();
 </script>
 </body>
 </html>
