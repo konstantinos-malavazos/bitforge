@@ -97,11 +97,6 @@ Two rule sets ship side by side. Pick one with the toggle in the How-to-play dia
 with `?rules=xor` / `?rules=gate`. Saved games, best scores and tutorial progress are
 tracked separately per rule set, so switching never destroys the other's run.
 
-Gate shows a gold `GATE` badge in the header, because it blocks tiles that xor would have
-merged — which reads as the game being broken rather than as a different game. Tapping the
-badge opens the toggle, so noticing and getting back out are one gesture. The default rule
-set shows no badge; one that is always on is not a signal.
-
 **`xor`** (default) — the original. Every adjacent pair merges, unconditionally.
 
 **`gate`** (prototype) — collisions have three outcomes:

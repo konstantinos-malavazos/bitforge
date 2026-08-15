@@ -331,20 +331,12 @@
   .card .note{ margin:0; font-size:12px; color:var(--dim); line-height:1.45; }
   #rules-xor[hidden], #rules-gate[hidden]{ display:none; }
   #msg.over{ color:var(--gold); font-weight:700; }
-  #modebadge{ background:var(--gold); color:#08121c; border-color:var(--gold);
-              font-size:10px; letter-spacing:1.5px; font-weight:700; padding:5px 9px;
-              white-space:nowrap; }
-  #modebadge[hidden]{ display:none; }
 </style>
 </head>
 <body>
   <div class="topbar">
     <h1>Bit<span>Forge</span></h1>
     <div class="acts">
-      <!-- Gate blocks tiles that xor would have merged, which reads as the game being
-           broken if you do not know you switched rule set. Nothing else on the main
-           screen says which one is running. Tapping it opens the rules toggle. -->
-      <button id="modebadge" hidden></button>
       <button id="install" hidden>Install</button>
       <button id="newgame">New</button>
       <button class="ghost" id="help">How to play</button>
@@ -1329,7 +1321,6 @@ document.getElementById('skip').addEventListener('click', () => {
   startNormalGame();
 });
 helpBtn.addEventListener('click', openModal);
-document.getElementById('modebadge').addEventListener('click', openModal);
 closeBtn.addEventListener('click', closeModal);
 document.getElementById('replay').addEventListener('click', () => { closeModal(); startTutorial(); });
 modalEl.addEventListener('click', e => { if(e.target.id === 'modal') closeModal(); });
@@ -1404,10 +1395,6 @@ function applyModeChrome(){
     document.getElementById('mode-' + m).setAttribute('aria-pressed', String(m === mode));
   }
   document.title = mode === 'gate' ? 'BitForge 255 · Gate rules' : 'BitForge 255';
-  const badge = document.getElementById('modebadge');
-  badge.hidden = mode !== 'gate';
-  badge.textContent = 'GATE';
-  badge.title = 'You are playing the gate rule set. Tap to switch back.';
 }
 
 function bootMode(){
