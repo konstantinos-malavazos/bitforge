@@ -1,6 +1,6 @@
 /* Offline shell for BitForge.
    Bump CACHE when any precached file changes — the old cache is dropped on activate. */
-const CACHE = 'bitforge-v3';
+const CACHE = 'bitforge-v4';
 
 const SHELL = [
   './',
