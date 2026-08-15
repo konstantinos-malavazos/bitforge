@@ -216,8 +216,13 @@ with a relative URL, so its scope follows the subdirectory automatically.
 
 itch.io serves games from a sandboxed iframe on a separate origin, so the manifest and
 service worker are ignored there — the game runs fine, it just is not installable from
-an itch.io page. For an installable, offline-capable copy, serve the files from any
-HTTPS origin — the GitHub Pages URL above is one.
+an itch.io page. The Install button is therefore removed outright in that environment
+rather than left to fail: it is dropped whenever the page is framed, and also when the
+page is served from an `itch.io` or `itch.zone` host at the top level, where installing
+would bookmark itch's hosting path instead of this game.
+
+For an installable, offline-capable copy, serve the files from any HTTPS origin — the
+GitHub Pages URL above is one.
 
 If you would rather not enable Pages, this route needs no repository integration at all:
 

@@ -1317,22 +1317,35 @@ modalEl.addEventListener('click', e => { if(e.target.id === 'modal') closeModal(
 document.addEventListener('visibilitychange', () => { if(document.hidden) saveGame(); });
 window.addEventListener('pagehide', saveGame);
 
-/* ---------- install prompt (Android/Chromium; iOS uses Share → Add to Home Screen) ---------- */
+/* ---------- install prompt (Android/Chromium; iOS uses Share → Add to Home Screen) ----------
+   Not offered on itch.io. Games there run in a sandboxed iframe on a separate origin, so
+   the manifest and service worker are ignored and an install cannot work; and when one of
+   those asset URLs is opened directly at the top level, installing would bookmark itch's
+   hosting path rather than this game. Both cases are suppressed rather than left to fail. */
+const embedded = (() => { try { return window.self !== window.top; } catch { return true; } })();
+const itchHosted = /(^|\.)itch\.(io|zone)$/i.test(location.hostname);
+const installable = !embedded && !itchHosted;
+
 let deferredPrompt = null;
 const installBtn = document.getElementById('install');
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.hidden = false;
-});
-installBtn.addEventListener('click', async () => {
-  if(!deferredPrompt) return;
-  installBtn.hidden = true;
-  deferredPrompt.prompt();
-  await deferredPrompt.userChoice.catch(() => {});
-  deferredPrompt = null;
-});
-window.addEventListener('appinstalled', () => { installBtn.hidden = true; deferredPrompt = null; });
+
+if(installable){
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installBtn.hidden = false;
+  });
+  installBtn.addEventListener('click', async () => {
+    if(!deferredPrompt) return;
+    installBtn.hidden = true;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice.catch(() => {});
+    deferredPrompt = null;
+  });
+  window.addEventListener('appinstalled', () => { installBtn.hidden = true; deferredPrompt = null; });
+} else {
+  installBtn.remove();
+}
 
 /* ---------- service worker (offline play when self-hosted) ---------- */
 if('serviceWorker' in navigator && location.protocol === 'https:'){
