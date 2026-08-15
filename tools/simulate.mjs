@@ -6,6 +6,8 @@
  *   node tools/simulate.mjs dry             # moves that merge nothing, chosen and forced
  *   node tools/simulate.mjs ceiling         # the score-per-move ceiling
  *   node tools/simulate.mjs orders          # moves to forge an arbitrary target byte
+ *   node tools/simulate.mjs hold            # orders holding K bytes on the board at once
+ *   node tools/simulate.mjs bank            # orders of K bytes forged one at a time
  *
  * The rules below mirror index.html. Change one there and it has to change here, or
  * every number this prints is about a different game. `validate` exists to catch that:
@@ -321,7 +323,188 @@ function orders(n = 400) {
   console.log('play involved — note the p10. Any target-naming mode needs a floor of four.');
 }
 
-const CMDS = { validate, cadence, dry: dryMoves, ceiling, orders };
+/* ---------- how a later order can be made harder than an earlier one ---------- */
+
+function drawBytes(k, [lo, hi]) {
+  const set = new Set();
+  let guard = 0;
+  while (set.size < k && guard++ < 500) {
+    const nb = lo + Math.floor(Math.random() * (hi - lo + 1));
+    const bits = [0, 1, 2, 3, 4, 5, 6, 7].sort(() => Math.random() - .5).slice(0, nb);
+    set.add(bits.reduce((a, b) => a | (1 << b), 0));
+  }
+  return [...set];
+}
+
+const presentOf = (g, targets) => {
+  const flat = g.flat();
+  return targets.filter(T => flat.includes(T));
+};
+
+// Protected tiles are cleared from the copy the builder scores against, so the policy
+// builds the missing byte out of everything *except* the ones it is already holding.
+function evalMulti(g, targets) {
+  const present = presentOf(g, targets);
+  if (present.length === targets.length) return 1e9;
+  const gg = clone(g);
+  for (const T of present) {
+    let done = false;
+    for (let r = 0; r < SIZE && !done; r++) for (let c = 0; c < SIZE && !done; c++) {
+      if (gg[r][c] === T) { gg[r][c] = 0; done = true; }
+    }
+  }
+  const active = targets.find(T => !present.includes(T));
+  return 1e7 * present.length + evalTo(gg, active);
+}
+
+function chargesMulti(g, charges, targets) {
+  let used = 0;
+  while (used < charges) {
+    let best = null, bestVal = evalMulti(g, targets);
+    for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
+      if (!canShift(g[r][c])) continue;
+      const v = g[r][c];
+      g[r][c] = v << 1;
+      const val = evalMulti(g, targets);
+      g[r][c] = v;
+      if (val > bestVal) { bestVal = val; best = [r, c]; }
+    }
+    if (!best) break;
+    g[best[0]][best[1]] <<= 1; used++;
+  }
+  return used;
+}
+
+/* Fill `orderCount` successive orders of K bytes each, all K held at the same time.
+   Returns the move gap for every order completed before the cap. */
+function playMulti({ k = 1, bits = [4, 7], orderCount = 6, maxMoves = 4000, policy = 'register' } = {}) {
+  const g = newGrid();
+  let targets = drawBytes(k, bits);
+  let moves = 0, score = 0, spent = 0, lastDone = 0, filled = 0;
+  const gaps = [];
+
+  while (moves < maxMoves && filled < orderCount) {
+    const charges = Math.floor(score / SHIFT_COST) - spent;
+    if (charges > 0) spent += chargesMulti(g, charges, targets);
+
+    if (presentOf(g, targets).length === targets.length) {
+      filled++; gaps.push(moves - lastDone); lastDone = moves;
+      for (const T of targets) {
+        let done = false;
+        for (let r = 0; r < SIZE && !done; r++) for (let c = 0; c < SIZE && !done; c++) {
+          if (g[r][c] === T) { g[r][c] = 0; done = true; }
+        }
+      }
+      targets = drawBytes(k, bits);
+      continue;
+    }
+
+    const legal = [];
+    for (const d of DIRS) {
+      const t = clone(g);
+      if (!applyMove(t, d).changed) continue;
+      legal.push({ d, t });
+    }
+    if (!legal.length) break;
+
+    let pick;
+    if (policy === 'random') pick = legal[Math.floor(Math.random() * legal.length)];
+    else {
+      let bestVal = -Infinity;
+      for (const o of legal) {
+        const v = evalMulti(o.t, targets);
+        if (v > bestVal) { bestVal = v; pick = o; }
+      }
+    }
+    const res = applyMove(g, pick.d);
+    moves++; score += res.gained;
+    spawn(g, res.avoid);
+  }
+  return { gaps, filled, moves };
+}
+
+function hold(n = 200) {
+  console.log('Orders that name K bytes, all of which must sit on the board together.');
+  console.log('The question is whether a finished byte can survive while you build the next.\n');
+  console.log('K   filled/run   median moves   p90    completion');
+  for (const k of [1, 2, 3, 4]) {
+    const rs = Array.from({ length: n }, () => playMulti({ k, orderCount: 6, maxMoves: 4000 }));
+    const gaps = rs.flatMap(r => r.gaps);
+    const avgFilled = mean(rs.map(r => r.filled));
+    const rate = rs.filter(r => r.filled >= 1).length / rs.length;
+    console.log(
+      String(k).padEnd(4),
+      pad(avgFilled.toFixed(2), 8),
+      pad(gaps.length ? median(gaps) : '-', 13),
+      pad(gaps.length ? pctl(gaps, .9) : '-', 6),
+      pad((rate * 100).toFixed(0) + '%', 12));
+  }
+}
+
+/* Banked orders: the K bytes are forged one at a time and each is consumed on the spot,
+   so nothing fragile has to be parked. Tests whether K bytes really costs K times one. */
+function playBank({ k = 1, bits = [4, 7], orderCount = 6, maxMoves = 6000, shiftCost = SHIFT_COST } = {}) {
+  const g = newGrid();
+  let targets = drawBytes(k, bits), idx = 0;
+  let moves = 0, score = 0, spent = 0, lastDone = 0, filled = 0;
+  const gaps = [];
+
+  while (moves < maxMoves && filled < orderCount) {
+    const T = targets[idx];
+    if (shiftCost != null) {
+      const charges = Math.floor(score / shiftCost) - spent;
+      if (charges > 0) spent += useCharges(g, charges, 'register', T);
+    }
+    let hit = false;
+    for (let r = 0; r < SIZE && !hit; r++) for (let c = 0; c < SIZE && !hit; c++) {
+      if (g[r][c] === T) { g[r][c] = 0; hit = true; }
+    }
+    if (hit) {
+      idx++;
+      if (idx >= targets.length) {
+        filled++; gaps.push(moves - lastDone); lastDone = moves;
+        targets = drawBytes(k, bits); idx = 0;
+      }
+      continue;
+    }
+
+    const legal = [];
+    for (const d of DIRS) {
+      const t = clone(g);
+      if (!applyMove(t, d).changed) continue;
+      legal.push({ d, t });
+    }
+    if (!legal.length) break;
+    let pick, bestVal = -Infinity;
+    for (const o of legal) {
+      const v = evalTo(o.t, T);
+      if (v > bestVal) { bestVal = v; pick = o; }
+    }
+    const res = applyMove(g, pick.d);
+    moves++; score += res.gained;
+    spawn(g, res.avoid);
+  }
+  return { gaps, filled, moves, score };
+}
+
+function bank(n = 250) {
+  console.log('Ramp A — orders of K bytes, forged one at a time and consumed as they land.\n');
+  console.log('K   median moves   p90    per byte');
+  for (const k of [1, 2, 3, 4, 5]) {
+    const gaps = Array.from({ length: n }, () => playBank({ k, orderCount: 5 })).flatMap(r => r.gaps);
+    console.log(String(k).padEnd(4), pad(median(gaps), 8), pad(pctl(gaps, .9), 8),
+      pad((median(gaps) / k).toFixed(0), 10));
+  }
+
+  console.log('\nRamp B — one byte per order, with the shift tool getting dearer.\n');
+  console.log('cost   median moves   p90');
+  for (const c of [25, 50, 100, 200, null]) {
+    const gaps = Array.from({ length: n }, () => playBank({ k: 1, orderCount: 5, shiftCost: c })).flatMap(r => r.gaps);
+    console.log(String(c ?? 'none').padEnd(6), pad(median(gaps), 8), pad(pctl(gaps, .9), 8));
+  }
+}
+
+const CMDS = { validate, cadence, dry: dryMoves, ceiling, orders, hold, bank };
 const cmd = process.argv[2] || 'validate';
 if (!CMDS[cmd]) {
   console.error(`unknown command "${cmd}" — expected one of: ${Object.keys(CMDS).join(', ')}`);

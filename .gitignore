@@ -1,3 +1,8 @@
 node_modules/
 dist/
 .DS_Store
+
+# Throwaway prototypes, rebuilt on demand from tools/. The repository root is the
+# published site, so a rough rule set landing here would go live for anyone with
+# the link. Build them, play them, leave them untracked.
+prototype/
