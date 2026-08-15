@@ -25,8 +25,19 @@ because equal tiles cancel to nothing:
 | `3 3 5` | `5` | `3^3 = 0`, the pair annihilates |
 
 Verified exhaustively over 2401 rows: of the three-tile rows that collapse to one, 100%
-have an identical leading pair; of those that collapse to two, none do. A cancelling pair
-visibly dissolves as it meets, which is what tells the two cases apart on screen.
+have an identical leading pair; of those that collapse to two, none do.
+
+Cancelling and merging are deliberately kept distinguishable on screen, because the two
+outcomes are easy to confuse:
+
+- A cancelling pair visibly dissolves as it meets, rather than blinking out.
+- The tile each move spawns is kept off any square a pair just vacated. Without that,
+  since 40% of spawns are a `1`, cancelling two `1`s would routinely drop a fresh `1`
+  exactly where they vanished — reading as though they had merged into one, the precise
+  opposite of what happened. It is only a preference: if those are the only free cells,
+  the spawn still goes there.
+- The new tile also arrives a beat after any merge result, so the two never appear in the
+  same instant.
 
 Score is the number of set bits produced by merges. There is no lose state: each line
 collapses to at most two tiles per move, so the board can hold at most nine tiles and

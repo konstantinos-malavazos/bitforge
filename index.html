@@ -130,7 +130,10 @@
   }
   /* pop/merge use the `scale` property, not `transform`, so they compose with the
      `translate` the slide is animating instead of clobbering it. */
-  .tile.spawned{ animation:pop .13s ease-out; }
+  /* Delayed so a new tile lands after the merge results have popped, rather than at
+     the same instant — otherwise a spawn is indistinguishable from a merge result.
+     `both` holds it invisible through the delay. */
+  .tile.spawned{ animation:pop .13s ease-out .09s both; }
   .tile.merged{ animation:merge .2s ease-out; }
   /* A pair that XORs to zero leaves nothing behind. Without this the two tiles just
      blink out on arrival, and when a third tile lands on the same cell it reads as
@@ -513,12 +516,28 @@ function emptyCells(){
   return e;
 }
 
-function spawn(){
-  const e = emptyCells();
+/* `avoid` holds the cells where a pair just annihilated. Landing a new tile there
+   reads as "those two merged into this" — and since 40% of spawns are a 1, cancelling
+   two 1s otherwise produces a fresh 1 on the very square they vanished from, which is
+   the exact opposite of what happened. Only ever a preference: if those are the only
+   free cells, the spawn still has to go somewhere. */
+function spawn(avoid){
+  let e = emptyCells();
   if(!e.length) return false;
+  if(avoid && avoid.size){
+    const clear = e.filter(([r,c]) => !avoid.has(r + ',' + c));
+    if(clear.length) e = clear;
+  }
   const [r,c] = e[Math.floor(Math.random()*e.length)];
   grid[r][c] = randomTile();
   return true;
+}
+
+// Destinations where a pair cancelled to nothing on this move.
+function vanishedCells(anim){
+  const s = new Set();
+  for(const m of anim) if(m.vanish) s.add(m.toR + ',' + m.toC);
+  return s;
 }
 
 function coord(dir, i, j){
@@ -670,7 +689,7 @@ function move(dir){
   bytes += res.forged;
   moves++;
   if(score > best){ best = score; store.set(bestKey(), String(best)); }
-  spawn();
+  spawn(vanishedCells(res.anim));
   buzz(res.gained);
   renderStats();
   startSlide(res.anim);
