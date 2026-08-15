@@ -1,15 +1,15 @@
-# Handoff — orders is built and merged, and nobody has played it
+# Handoff — orders is built, tuned, and still unplayed
 
-**Next session's job:** the endless question is answered and shipped. What is missing is
-a playtest, and then one decision that only a playtest can settle. Do not re-run the
-brainstorm, and do not redesign the mode before someone has swiped it.
+**Next session's job:** the endless question is answered and shipped, and the mode has
+since been tuned once. Every decision in it was made from simulation. **Nobody has
+played it.** Get it played before changing anything else. Do not re-run the brainstorm.
 
-Repo: `konstantinos-malavazos/bitforge` · one file, `index.html`, 1428 lines, no build
+Repo: `konstantinos-malavazos/bitforge` · one file, `index.html`, 1464 lines, no build
 step, no dependencies, no framework.
 
 **Branch:** start a new one from `main`
-(`git fetch origin main && git checkout -B <branch> origin/main`). PR #20 is merged;
-never stack on merged history.
+(`git fetch origin main && git checkout -B <branch> origin/main`). PRs #20, #21 and #22
+are merged; never stack on merged history.
 
 ---
 
@@ -21,19 +21,20 @@ Orders shipped. This is the first change to the game itself in three sessions.
 |---|---|
 | `index.html` | Orders mode, reachable from a new button in the top bar. |
 | `README.md` | New *Orders* section; the ramp measurements added to *Balance notes*. |
-| `tools/simulate.mjs` | Two new commands, `hold` and `bank`. Now 513 lines. |
-| `sw.js` | `CACHE` bumped to `bitforge-v5`. |
-| `.gitignore` | `prototype/` ignored, so a throwaway can never reach the live site. |
-| `tools/test-browser.mjs` | 37 browser assertions over both modes. Needs playwright. |
+| `tools/simulate.mjs` | Three new commands, `hold`, `bank` and `think`. Now 618 lines. |
+| `sw.js` | `CACHE` bumped to `bitforge-v7`. |
+| `.gitignore` | `prototype/` and `node_modules` ignored — the latter without a trailing slash, so a *symlinked* install cannot slip past it. |
+| `tools/test-browser.mjs` | 52 browser assertions over both modes. Needs playwright. |
 | `CONTEXT.md` | The word list, and how to write for this owner. `/wait-what` points here. |
 
 ## The mode, in one paragraph
 
 The bar names a byte. You forge it, it is taken off the board, another byte is named.
 That repeats for as long as the player wants. There is no timer and no ending. **Best**
-is relabelled **Most orders** and counts orders filled instead of points. Classic is
-untouched and each mode keeps its own board and its own record under its own keys, so
-switching parks a run rather than discarding it.
+is relabelled **Most orders** and counts orders filled instead of points. **Two tiles
+arrive each move here, against one in classic.** Classic is untouched and each mode keeps
+its own board and its own record under its own keys, so switching parks a run rather than
+discarding it.
 
 ---
 
@@ -82,7 +83,7 @@ orders has a floor of four.
 **Register cadence is stationary** — 62 moves for the first, then 50/50/52/50/53/53/55.
 There is no natural difficulty curve to inherit; any ramp has to be authored.
 
-## The ramp question — the one real decision left
+## The ramp question — measured, unbuilt, and now second in line
 
 Orders ships **without a ramp**. Order 20 is drawn exactly like order 2. Two candidates
 are measured and neither is built, because which one to use is a question about feel.
@@ -121,6 +122,41 @@ sharpest measure of how fragile a forged tile is.
 **A third option is live: no ramp at all.** The mode may be fine as a calm, open-ended
 puzzle. Nobody knows yet, because nobody has played it.
 
+## Bigger versus harder — read this before touching the ramp
+
+The owner rejected both ramps above in one sentence: *"lets make it harder mentally, not
+just bigger."* Both make an order **bigger** — more bytes, or a dearer tool. Neither makes
+it need more thought, and that distinction is measurable.
+
+**The metric is the skill gap:** careless median divided by careful median. It is the
+number this repo already used to reject need-weighted spawns for collapsing to 1.28x, and
+to justify the shift tool for widening to 4.73x. **A change that leaves the gap flat is
+more work, not more game.** Measure candidates with `node tools/simulate.mjs think`.
+
+| variant | careful | careless | gap | p90 | tiles on board | waiting moves |
+|---|---|---|---|---|---|---|
+| one spawn a move | 57 | 358 | 6.3x | 158 | 4.2/16 | 16.5% |
+| 3x3 board | 48 | 340 | 7.1x | 125 | 3.7/9 | 14.7% |
+| **two spawns a move — shipped** | **28** | **264** | **9.4x** | **78** | **6.0/16** | **2.0%** |
+| next order shown | 57 | 370 | 6.5x | 166 | 4.3/16 | 16.7% |
+| 3x3 and two spawns | 22 | 269 | 12.2x | 54 | 5.5/9 | 1.4% |
+
+**The deciding column is the last one.** With one spawn, one move in six merged nothing
+*by choice* — the player marking time until a useful bit turned up. Two spawns makes it
+one move in fifty. Orders also got *shorter*, not longer, and the bad tail halved.
+
+- **Showing the next order does nothing.** 6.5x against 6.3x is noise. Foresight is not
+  what this mode is short of. Do not build a preview.
+- **A 3x3 board is the stronger version of the same idea**, 12.2x, and is **not built**.
+  It runs at 5.5 tiles of 9, and shrinking the board changes how the game looks far more
+  than a spawn count does. This is the next lever if two spawns proves too gentle.
+- **Two spawns is not a ramp.** It makes every order denser; order 20 is still drawn
+  exactly like order 2.
+
+**Caveat on every gap number here:** the policy is one-ply, so a busier board hands it
+more good options and the absolute gaps are probably flattering. The *ordering* between
+variants is the trustworthy part.
+
 ## Dead, with the number that kills it
 
 - **A fixed move budget with a fixed refill.** Must be under 61 to end a good player and
@@ -142,6 +178,10 @@ puzzle. Nobody knows yet, because nobody has played it.
 2. **What Most orders should count.** Orders filled was chosen by reasoning, not by the
    user — they were asked and said *"not sure yet. lets discuss"*. Points is a one-line
    change if they prefer it.
+3. **Whether two spawns a move feels right.** It is the only tuning decision made so far
+   and it came entirely from simulation. Busier can read as richer or as noisier and no
+   number distinguishes those. If it is too gentle, the 3x3 board is the same idea turned
+   up. If it is too busy, the number lives in one constant, `ORDERS_SPAWNS`.
 
 ## How to talk to this user
 
@@ -179,6 +219,14 @@ written. Ask rather than infer.
   without a ramp.
 - The user marks a PR ready and merges within minutes. Get the PR body right the first
   time — it is the record that survives.
+- **Stubbing `window.spawn` in a browser test leaks into every later block.** It
+  overwrites the global outright, so the real function is unreachable and a later block
+  gets an empty board and asserts nothing at all. This shipped twice: once silently, once
+  caught only because a block moved. `tools/test-browser.mjs` now stashes the pristine
+  function on every load and restores from the stash. Never capture it mid-file.
+- **The user is often on a phone with no laptop.** Anything that needs a shell — the itch
+  build, the tests, the simulator — has to be run in-session and the artifact handed over,
+  not given as instructions.
 
 ## Environment and workflow facts
 
@@ -187,12 +235,12 @@ written. Ask rather than infer.
 - **Egress is restricted.** `*.github.io` and `raw.githack.com` are blocked, so the live
   site cannot be verified from inside a session. Say so rather than implying you checked.
 - **Caches bite.** `sw.js` has a `CACHE` constant that must be bumped whenever a
-  *precached* file changes. It is at `bitforge-v5`. The itch.io build is a frozen snapshot
-  (`./tools/build-itch.sh`).
+  *precached* file changes. It is at `bitforge-v7`. It was missed once this session and
+  caught only on the next commit — check it whenever `index.html` moves.
 - **The repository root is the published site.** Anything committed there goes live. This
   is why `prototype/` is gitignored and why the orders throwaway was deleted twice.
-- **Browser tests:** `npm i playwright` from the repo root (`node_modules/` is already
-  gitignored), then `node tools/test-browser.mjs`. 37 assertions covering both modes; it
+- **Browser tests:** `npm i playwright` from the repo root (`node_modules` is already
+  gitignored), then `node tools/test-browser.mjs`. 52 assertions covering both modes; it
   serves the repo itself and finds Chromium under `/opt/pw-browsers`, or takes `CHROME`.
   Run it after any change to `index.html`.
   - Playwright is deliberately absent from any `package.json`. The game ships as one file
@@ -208,5 +256,19 @@ written. Ask rather than infer.
 - **Storage keys.** Classic: `xor2048.save.xor.v2`, `xor2048.best.xor.v2`. Orders:
   `xor2048.save.orders.v1`, `xor2048.best.orders.v1`. Current mode: `xor2048.mode.v1`.
 - **PR flow:** open as draft; the user marks ready and merges quickly.
+- **Publishing.** Three routes, and only one of them can be driven from a session:
+  - *GitHub Pages* — the repository root **is** the site, so every merge to `main`
+    publishes itself. Needs enabling once in Settings → Pages, which only the owner can
+    do. See README → GitHub Pages, and do not add an Actions workflow.
+  - *itch.io* — `./tools/build-itch.sh` writes `dist/bitforge-itch.zip` with
+    `index.html` at the archive root, which is what itch.io requires. **Uploading cannot
+    be done from a session:** `itch.io` is blocked by the proxy (`CONNECT` returns 403),
+    `butler` is not installed, and it would need the owner's credentials regardless.
+    Build the zip, hand it over with `SendUserFile`, and give the settings table from
+    README → Publishing to itch.io. Never ask for an API key.
+  - *Netlify drop* — `dist/site/` is a plain folder for `app.netlify.com/drop`. Same
+    limitation: the drag-and-drop is the owner's to do.
+  - `dist/` is gitignored. Build artifacts must never be committed; the repository root
+    is the live site.
 
 No credentials, tokens or personal data appear in this document or in the repo.
