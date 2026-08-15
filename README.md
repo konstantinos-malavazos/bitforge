@@ -139,13 +139,25 @@ came up.
 two- or three-bit order is routinely filled by a spawn with no play involved — a p10 of
 three moves. Four bits is the floor that makes an order something you build.
 
+**Two tiles arrive each move here, against one in classic.** This is the one rule that
+makes an order need thought rather than patience, and it was chosen against the skill gap
+rather than against length. With a single spawn the board sits at about 4 tiles of 16 and
+**16.5% of moves merge nothing by choice** — one move in six spent waiting for a bit to
+turn up. Two spawns take that to **2.0%**. The careful-to-careless gap widens from 6.3×
+to 9.4×, and a careful order gets *shorter* rather than longer, 57 moves to 28, with the
+frustrating tail halved from a p90 of 158 to 78.
+
+It is a spawn-rate difference between the modes, not a merging difference. Every adjacent
+pair still merges unconditionally, which is the rule that has to hold.
+
 Each mode keeps its own board and its own record under its own keys, so switching parks
 a run rather than throwing it away. A classic run ends at `11111111` and scores a median
 262; an orders run never ends at all, so a shared best score would bury the classic one
 within one sitting.
 
-**No difficulty ramp yet.** Every order is drawn the same way, so order 20 is no harder
-than order 2. Two ramps have been measured and neither is built — see *Balance notes*.
+**Still no difficulty ramp.** Two spawns a move is a constant, not an escalation: it makes
+every order denser, but order 20 is still drawn exactly like order 2. Two ways to escalate
+have been measured and neither is built — see *Balance notes*.
 
 ## Layout
 
@@ -357,6 +369,39 @@ because the game takes the tool away.
 Both work and neither is a timer. Which one to build — or whether the mode is better
 without a ramp at all — is unsettled, and is a question about feel rather than one more
 simulation can answer.
+
+### Harder to play well, rather than longer
+
+Both ramps above make an order *bigger*. Neither makes it need more thought, and the
+difference is measurable: **the skill gap**, careless median over careful median, is the
+same number that rejected need-weighted spawns for collapsing to 1.28× and justified the
+shift tool for widening to 4.73×. A change that leaves the gap flat is more work, not more
+game. Measured with `node tools/simulate.mjs think`, medians in moves per order:
+
+| variant | careful | careless | gap | p90 | tiles on board | waiting moves |
+|---|---|---|---|---|---|---|
+| one spawn a move | 57 | 358 | 6.3× | 158 | 4.2/16 | 16.5% |
+| 3×3 board | 48 | 340 | 7.1× | 125 | 3.7/9 | 14.7% |
+| **two spawns a move** | **28** | **264** | **9.4×** | **78** | **6.0/16** | **2.0%** |
+| next order shown | 57 | 370 | 6.5× | 166 | 4.3/16 | 16.7% |
+| 3×3 and two spawns | 22 | 269 | 12.2× | 54 | 5.5/9 | 1.4% |
+
+Two spawns a move is what shipped. The waiting column is the reason: a single spawn leaves
+one move in six merging nothing *by choice*, which is the player marking time until a bit
+arrives. Two spawns makes that one move in fifty, so nearly every move is a decision.
+Orders also get shorter and the bad tail halves, which is the opposite of the ramps above.
+
+**Showing the next order does nothing** — 6.5× against 6.3× is noise. Foresight is not
+what this mode is short of, so it was not built.
+
+**The 3×3 board is the stronger version of the same idea** and is not built either. It
+reaches 12.2× but runs at 5.5 tiles of 9, and shrinking the board is a much larger change
+to how the game looks than changing a spawn count. Worth revisiting if two spawns proves
+too gentle.
+
+One caveat on all of these: the policy is one-ply. A busier board gives a greedy policy
+more good options, so the absolute gaps are probably flattering. The ordering between
+variants is the trustworthy part.
 
 ## License
 

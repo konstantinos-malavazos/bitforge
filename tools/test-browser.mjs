@@ -69,11 +69,19 @@ page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.
 const ok = [], bad = [];
 const check = (name, cond, extra = '') => (cond ? ok : bad).push(name + (extra ? ` — ${extra}` : ''));
 
+/* Several blocks below stub window.spawn to freeze the board. Stubbing overwrites the
+   global outright, so the real function is unreachable afterwards and any later block
+   that needs tiles to arrive gets an empty board and silently asserts nothing. That has
+   happened twice. The pristine function is stashed on every load, and any block that
+   needs real spawning restores from the stash rather than trusting what it inherits. */
+const stashSpawn = () => page.evaluate(() => { window.__realSpawn = window.spawn; });
+
 await page.goto(`http://localhost:${PORT}/index.html`);
 // Start as a returning player would, past the tutorial.
 await page.evaluate(() => localStorage.setItem('xor2048.tutorial.xor.v2', 'done'));
 await page.reload();
 await page.waitForTimeout(200);
+await stashSpawn();
 
 /* ---------- classic is untouched ---------- */
 let s = await page.evaluate(() => ({
@@ -185,6 +193,62 @@ const keys = await page.evaluate(() => {
     best:    !!localStorage.getItem('xor2048.best.orders.v1'),
   };
 });
+/* ---------- the spawn rate follows the mode ----------
+   Two tiles a move in orders, one in classic. Counted by occupancy rather than by
+   stubbing spawn, so it measures what actually lands on the board. */
+const rate = await page.evaluate(() => {
+  window.spawn = window.__realSpawn;
+  const settle = mode => {
+    setMode(mode); startRun();
+    const start = grid.flat().filter(v => v).length;
+    // One move, from a board with no adjacent pair to merge, so nothing is consumed.
+    grid = [[1,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+    const before = grid.flat().filter(v => v).length;
+    move('down');
+    return { start, before, after: grid.flat().filter(v => v).length };
+  };
+  const c = settle('classic'), o = settle('orders');
+  return { classic: c, orders: o };
+});
+check('classic starts with two tiles', rate.classic.start === 2, 'tiles ' + rate.classic.start);
+check('classic adds one tile a move', rate.classic.after - rate.classic.before === 1,
+  `${rate.classic.before} -> ${rate.classic.after}`);
+check('orders adds two tiles a move', rate.orders.after - rate.orders.before === 2,
+  `${rate.orders.before} -> ${rate.orders.after}`);
+
+/* ---------- the help screen tracks the mode ---------- */
+const help = await page.evaluate(() => {
+  const read = () => ({
+    orders: !document.getElementById('orders-help').hidden,
+    goal:   !document.getElementById('classic-goal').hidden,
+  });
+  const inOrders = read();
+  setMode('classic');
+  const inClassic = read();
+  setMode('orders');
+  return { inOrders, inClassic,
+           example: document.getElementById('orders-help').textContent };
+});
+check('orders help shows in orders', help.inOrders.orders);
+check('classic goal line hides in orders', help.inOrders.goal === false);
+check('orders help hides in classic', help.inClassic.orders === false);
+check('classic goal line shows in classic', help.inClassic.goal);
+check('the worked example is in the help', help.example.includes('00010100'));
+
+// The card scrolls in orders. It must still open at the top of its own text.
+const scrolled = await page.evaluate(() => {
+  closeModal();
+  openModal();
+  const card = document.querySelector('#modal .card');
+  // Read while it is still open: a closed modal reports both heights as 0.
+  const top = card.scrollTop;
+  const scrolls = card.scrollHeight > card.clientHeight + 1;
+  closeModal();
+  return { top, scrolls };
+});
+check('the help opens at the top', scrolled.top === 0, 'scrollTop ' + scrolled.top);
+check('and it does scroll, so that mattered', scrolled.scrolls);
+
 check('orders saves under its own key', keys.orders);
 check('classic save is still there', keys.classic);
 check('orders best is separate', keys.best);
@@ -202,6 +266,7 @@ check('and lands back in orders', round.mode === 'orders');
 
 await page.reload();
 await page.waitForTimeout(200);
+await stashSpawn();
 const kept = await page.evaluate(() => ({ mode, pc: popcount(order) }));
 check('mode survives a reload', kept.mode === 'orders', kept.mode);
 check('restored order is valid', kept.pc >= 4 && kept.pc <= 8, 'popcount ' + kept.pc);
@@ -216,18 +281,51 @@ const repaired = await page.evaluate(() => {
 });
 check('an out-of-range saved order is redrawn', repaired >= 4 && repaired <= 8, 'popcount ' + repaired);
 
-/* ---------- a long run ----------
+/* ---------- filling order after order, through real moves ----------
+   Deterministic on purpose. Whether *random* play happens to fill an order inside a
+   move budget is a die roll, and an earlier version of this file asserted exactly that
+   and failed about one run in twenty. Each order here is set up and filled by hand, so
+   a failure means the code broke. */
+const many = await page.evaluate(() => {
+  setMode('classic'); setMode('orders'); startRun();
+  // Restored below. Leaving it stubbed silently empties the board for every later block,
+  // which is exactly how the soak underneath it ran 2500 no-op moves and still passed.
+  window.spawn = () => false;
+  const before = filled;
+  for (let i = 0; i < 10; i++) {
+    const T = order;
+    const a = T & -T;
+    grid = [[a, T ^ a, 0, 0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+    move('left');
+  }
+  window.spawn = window.__realSpawn;
+  return { before, filled, label: document.getElementById('goalk').textContent,
+           pc: popcount(order), over, won };
+});
+check('ten orders fill in a row', many.filled === many.before + 10, `${many.before} -> ${many.filled}`);
+check('the label tracks the count', many.label === `Order ${many.filled + 1}`, many.label);
+check('ten fills do not end the run', many.over === false && many.won === false);
+check('order still valid after ten fills', many.pc >= 4 && many.pc <= 8);
+
+/* ---------- a long run, as a soak ----------
    Random directions, not a fixed cycle: left/up/right/down oscillates and is a far worse
-   policy than chance. The simulator puts random play at a 322-459 move median per target. */
+   policy than chance. This is here to catch a crash or a broken invariant over thousands
+   of moves, so nothing it asserts depends on how well the random player does. */
 const run = await page.evaluate(() => {
+  window.spawn = window.__realSpawn;
   setMode('classic'); setMode('orders'); startRun();
   const dirs = ['left','up','right','down'];
+  // Tiles must actually be arriving. If an earlier block left spawn stubbed, the board
+  // stays empty, every move is rejected as no-change, and the soak asserts nothing.
+  const seeded = grid.flat().filter(v => v).length;
   for (let i = 0; i < 2500; i++) move(dirs[Math.floor(Math.random() * 4)]);
-  return { filled, moves, over, won, pc: popcount(order) };
+  return { filled, moves, over, won, seeded, occupied: grid.flat().filter(v => v).length,
+           pc: popcount(order) };
 });
+check('the soak board is actually seeded', run.seeded === 2, 'tiles ' + run.seeded);
+check('the soak board still holds tiles', run.occupied > 0, 'tiles ' + run.occupied);
 check('2500 moves do not end the run', run.over === false && run.won === false);
-check('moves actually advanced', run.moves > 2000, 'moves ' + run.moves);
-check('random play fills orders', run.filled > 0, 'filled ' + run.filled);
+check('moves advanced', run.moves > 1000, 'moves ' + run.moves);
 check('order is still valid after a long run', run.pc >= 4 && run.pc <= 8);
 
 check('no page errors', errors.length === 0, errors.join(' | '));

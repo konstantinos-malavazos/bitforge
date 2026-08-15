@@ -6,6 +6,9 @@
  *   node tools/simulate.mjs dry             # moves that merge nothing, chosen and forced
  *   node tools/simulate.mjs ceiling         # the score-per-move ceiling
  *   node tools/simulate.mjs orders          # moves to forge an arbitrary target byte
+ *   node tools/simulate.mjs hold            # orders naming several bytes held at once
+ *   node tools/simulate.mjs bank            # the two ways to make a later order bigger
+ *   node tools/simulate.mjs think           # what makes an order need thought, by skill gap
  *   node tools/simulate.mjs hold            # orders holding K bytes on the board at once
  *   node tools/simulate.mjs bank            # orders of K bytes forged one at a time
  *
@@ -15,7 +18,7 @@
  * simulator that has drifted says so before anyone trusts it.
  */
 
-const SIZE = 4;
+let SIZE = 4;   // mutable: the `think` variants include a smaller board
 const DIRS = ['left', 'right', 'up', 'down'];
 const SHIFT_COST = 50;
 
@@ -71,7 +74,8 @@ function applyMove(grid, dir) {
 }
 
 // `avoid` holds the cells where a pair just annihilated — only ever a preference.
-function spawn(grid, avoid) {
+function spawn(grid, avoid, n = 1) {
+  for (let i = 1; i < n; i++) spawn(grid, avoid, 1);
   let free = [];
   for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) if (grid[r][c] === 0) free.push([r, c]);
   if (!free.length) return false;
@@ -504,7 +508,108 @@ function bank(n = 250) {
   }
 }
 
-const CMDS = { validate, cadence, dry: dryMoves, ceiling, orders, hold, bank };
+/* ---------- experiment: what makes an order need more thought ----------
+
+   "Bigger" is more moves per order. "Harder mentally" is a wider skill gap — how much
+   better a thinking player does than a careless one. That is the number this repo already
+   used to reject need-weighted spawns, where the gap collapsed to 1.28x because the board
+   handed you the bit you needed and no decision was left. */
+
+function drawByte([lo, hi]) {
+  const k = lo + Math.floor(Math.random() * (hi - lo + 1));
+  const bits = [0,1,2,3,4,5,6,7];
+  for (let i = bits.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bits[i], bits[j]] = [bits[j], bits[i]];
+  }
+  return bits.slice(0, k).reduce((a, b) => a | (1 << b), 0);
+}
+
+function playOrders({ size = 4, spawns = 1, preview = false, policy = 'register',
+                      orderCount = 8, maxMoves = 5000, bits = [4, 8] } = {}) {
+  SIZE = size;
+  const g = newGrid();
+  let T = drawByte(bits), NEXT = drawByte(bits);
+  let moves = 0, score = 0, spent = 0, last = 0, filled = 0;
+  let occSum = 0, peak = 0, dry = 0;
+  const gaps = [];
+
+  while (moves < maxMoves && filled < orderCount) {
+    const charges = Math.floor(score / SHIFT_COST) - spent;
+    if (charges > 0) spent += useCharges(g, charges, policy, T);
+
+    let hit = false;
+    for (let r = 0; r < SIZE && !hit; r++) for (let c = 0; c < SIZE && !hit; c++) {
+      if (g[r][c] === T) { g[r][c] = 0; hit = true; }
+    }
+    if (hit) {
+      filled++; gaps.push(moves - last); last = moves;
+      T = NEXT; NEXT = drawByte(bits);
+      continue;
+    }
+
+    const legal = [];
+    for (const d of DIRS) {
+      const t = clone(g);
+      const res = applyMove(t, d);
+      if (res.changed) legal.push({ d, t, res });
+    }
+    if (!legal.length) break;
+
+    let pick;
+    if (policy === 'random') pick = legal[Math.floor(Math.random() * legal.length)];
+    else {
+      let bestVal = -Infinity;
+      for (const o of legal) {
+        let v = evalTo(o.t, T) + 3 * o.res.gained;
+        // A nudge, not a second goal: clamped so the jackpot term for NEXT cannot
+        // out-shout the order actually being worked on.
+        if (preview) v += 0.15 * Math.min(evalTo(o.t, NEXT), 20000);
+        if (v > bestVal) { bestVal = v; pick = o; }
+      }
+    }
+    const res = applyMove(g, pick.d);
+    moves++; score += res.gained;
+    if (!res.merges) dry++;
+    spawn(g, res.avoid, spawns);
+    const occ = g.flat().filter(v => v).length;
+    occSum += occ; peak = Math.max(peak, occ);
+  }
+  const slots = SIZE * SIZE;
+  SIZE = 4;
+  return { gaps, filled, moves, slots,
+           avgOcc: occSum / Math.max(1, moves), peak,
+           dryPct: 100 * dry / Math.max(1, moves) };
+}
+
+function think(n = 400) {
+  console.log('Moves per order, and the skill gap: careless median divided by careful median.');
+  console.log('Bigger gap = the order rewards thought. Same gap = it is only more work.\n');
+  console.log('variant'.padEnd(26), 'careful  careless   gap    p90  tiles/board  waits');
+
+  const variants = [
+    ['as shipped',                {}],
+    ['smaller board, 3x3',        { size: 3 }],
+    ['two tiles spawn per move',  { spawns: 2 }],
+    ['next order shown',          { preview: true }],
+    ['3x3 and two spawns',        { size: 3, spawns: 2 }],
+  ];
+
+  for (const [name, opts] of variants) {
+    const carefulRuns = Array.from({ length: n }, () => playOrders({ ...opts, policy: 'register' }));
+    const careful  = carefulRuns.flatMap(r => r.gaps);
+    const careless = Array.from({ length: n }, () => playOrders({ ...opts, policy: 'random' })).flatMap(r => r.gaps);
+    if (!careful.length || !careless.length) { console.log(name.padEnd(26), 'no orders filled'); continue; }
+    const a = median(careful), b = median(careless);
+    const occ = mean(carefulRuns.map(r => r.avgOcc)), slots = carefulRuns[0].slots;
+    console.log(name.padEnd(26), pad(a, 6), pad(b, 9), pad((b / a).toFixed(2) + 'x', 7),
+      pad(pctl(careful, .9), 6), pad(occ.toFixed(1) + '/' + slots, 9),
+      pad(mean(carefulRuns.map(r => r.dryPct)).toFixed(1) + '%', 7));
+  }
+}
+
+
+const CMDS = { validate, cadence, dry: dryMoves, ceiling, orders, hold, bank, think };
 const cmd = process.argv[2] || 'validate';
 if (!CMDS[cmd]) {
   console.error(`unknown command "${cmd}" — expected one of: ${Object.keys(CMDS).join(', ')}`);

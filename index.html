@@ -397,16 +397,28 @@
           Spend one to double a tile: <span class="mono">01000000</span> becomes
           <span class="mono">10000000</span>. XOR never carries, so this is the only way to
           make bit 7 yourself instead of waiting for a 128 to spawn.</li>
-        <li>Goal: forge the full register <span class="mono">11111111 = 255</span>.</li>
+        <li id="classic-goal">Goal: forge the full register <span class="mono">11111111 = 255</span>.</li>
         <li>Score = total bits set on merges. No lose state — it's a puzzle, take your time.</li>
       </ul>
 
       <ul id="orders-help" hidden>
         <li><b>Orders.</b> The bar shows a byte. Forge that byte.</li>
-        <li>The tile comes off the board, and another byte is asked for.</li>
-        <li>That goes on for as long as you want. There is no timer and no ending.</li>
+        <li><b>An example.</b> The order is <span class="mono">00010100</span>. It asks for two
+          bits — bit 4 and bit 2. Bit 4 on its own is the tile <span class="mono">16</span>. Bit 2
+          on its own is the tile <span class="mono">4</span>. Merge those two and you have
+          <span class="mono">00010100</span>, which is <span class="mono">20</span>. The order
+          is filled.</li>
+        <li>The tile then comes off the board, and another byte is asked for.</li>
+        <li><b>Two tiles arrive each move here, not one.</b> The board stays busier, so you
+          are picking between merges instead of waiting for a bit to turn up.</li>
+        <li><b>Watch the overlap.</b> A tile holding a bit the order does not ask for makes the
+          byte wrong. Two tiles holding the same bit cancel it to <span class="mono">0</span>.
+          Look for tiles whose bits do not overlap.</li>
+        <li>That goes on for as long as you want. There is no timer, and you cannot lose.
+          Press <b>New</b> when you have had enough.</li>
         <li>An order never asks for fewer than four bits, because a spawn would fill it for you.</li>
-        <li><b>Best</b> counts orders filled, not points. Each mode keeps its own board and its own best.</li>
+        <li><b>Most orders</b> counts orders filled, not points. Each mode keeps its own board
+          and its own record.</li>
       </ul>
 
       <div class="row">
@@ -452,6 +464,21 @@ let grid, score, moves, won, over, best = 0;
    order something you build rather than something you are handed. */
 const ORDER_MIN_BITS = 4;
 const ORDER_MAX_BITS = 8;
+
+/* Orders drops two tiles a move. Classic drops one.
+
+   This is the one thing that makes an order need thought rather than patience. With a
+   single spawn the board sits at about 4 tiles of 16 and 16.5% of moves merge nothing
+   *by choice* — one move in six spent waiting for a bit to turn up. Two spawns take that
+   to 2%, so you are choosing on nearly every move instead of marking time.
+
+   It is measured as making the mode harder to play well, not longer: the careful-to-
+   careless gap goes from 6.3x to 9.4x, while a careful order gets *shorter*, 57 moves to
+   28, and the frustrating tail halves, p90 158 to 78.
+
+   It is a spawn-rate difference between the modes, not a merging difference. Every
+   adjacent pair still merges unconditionally, which is the rule that has to hold. */
+const ORDERS_SPAWNS = 2;
 let mode = 'classic';
 let order = 0;      // the byte orders mode is asking for
 let filled = 0;     // orders filled in this run
@@ -755,7 +782,8 @@ function move(dir){
   lastChanged = res.merged;
   score += res.gained;
   moves++;
-  spawn(vanishedCells(res.anim));
+  const avoid = vanishedCells(res.anim);
+  for(let i = 0; i < (ordersLive() ? ORDERS_SPAWNS : 1); i++) spawn(avoid);
   buzz(res.gained);
   // Both of these run before renderStats so the bar shows the state this move
   // produced. A filled order clears its tile from `grid` here; the slide below still
@@ -1244,7 +1272,12 @@ function openModal(){
   lastFocus = document.activeElement;
   modalEl.classList.add('open');
   modalEl.setAttribute('aria-hidden', 'false');
-  closeBtn.focus();
+  /* The card scrolls once the orders help is in it. Focusing the footer button would
+     drag it into view and open the help 437px down its own text, which is what happened
+     the first time the worked example was added. preventScroll stops that; the explicit
+     reset covers anything that ignores the option. */
+  closeBtn.focus({ preventScroll: true });
+  modalEl.querySelector('.card').scrollTop = 0;
 }
 function closeModal(){
   modalEl.classList.remove('open');
@@ -1382,7 +1415,8 @@ const RULES =
 const LEGEND = {
   classic: RULES + 'Forge <b>11111111</b> (255).',
   orders:  RULES + 'Forge the byte shown under <b>Order</b>. It comes off the board and '
-         + 'another one is asked for. No timer, no ending — press <b>New</b> when you have had enough.',
+         + 'another one is asked for. <b>Two tiles arrive each move here</b>, so the board stays '
+         + 'busy. No timer, no ending — press <b>New</b> when you have had enough.',
 };
 
 const modeBtn = document.getElementById('mode');
@@ -1395,6 +1429,8 @@ function renderChrome(){
     : 'Forge one byte after another, for as long as you like. Your classic run is kept.';
   document.getElementById('legend').innerHTML = LEGEND[mode];
   document.getElementById('orders-help').hidden = !ordersMode();
+  // The classic goal line contradicts the bar while an order is showing.
+  document.getElementById('classic-goal').hidden = ordersMode();
 }
 
 modeBtn.addEventListener('click', () => setMode(ordersMode() ? 'classic' : 'orders'));
