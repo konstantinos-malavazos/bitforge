@@ -72,6 +72,19 @@ Arm it with the `<<` button, then tap a tile — or use the arrow keys to move t
 cursor and Enter to confirm, so it works without a pointer. Escape cancels, and swiping
 while armed just makes the move.
 
+The control fills with the accent colour the moment a charge is available and pulses as
+each one lands, and a meter under it tracks progress toward the next, so the economy is
+visible rather than implied. Step 4 of the tutorial hands out one free charge and will
+not accept a swipe, so the tool is met before it is needed.
+
+## Ending a run
+
+Forging `11111111` ends the game rather than continuing past it. A panel reports the
+score, the move count and the best score, and offers a new game; *View board* dismisses
+it to look at the final position, but the run stays finished and input stays off. A
+finished run reloads with its panel intact. Gate mode's jam uses the same panel, since
+both are terminal states and should not read differently.
+
 ## Rule sets
 
 Two rule sets ship side by side. Pick one with the toggle in the How-to-play dialog, or

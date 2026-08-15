@@ -197,23 +197,44 @@
 
   /* Shift tool. XOR never carries, so bit 7 can only ever arrive as a literal 128
      spawn — this is the earned way to manufacture one instead of waiting. */
+/* The tool panel matches the tutorial prompt's frame so it reads as a control
+     surface rather than a stray button, and carries a meter for the next charge. */
   #tools{
-    width:100%; max-width:480px; display:flex; align-items:center; gap:10px;
+    width:100%; max-width:480px;
+    display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 11px;
+    align-items:center;
+    background:var(--panel); border:1px solid #2c3547; border-left:3px solid var(--accent);
+    border-radius:10px; padding:8px 11px;
   }
   #tools[hidden]{ display:none; }
   #shift{
-    display:flex; align-items:center; gap:7px; padding:6px 12px; font-size:13px;
-    border-color:#2c3547; flex:none;
+    grid-row:1 / span 2; align-self:stretch;
+    display:flex; align-items:center; gap:8px; padding:8px 13px; font-size:14px;
+    border-color:#2c3547;
   }
-  #shift .op{ font-weight:700; letter-spacing:-1px; }
+  #shift .op{ font-weight:700; letter-spacing:-1.5px; font-size:16px; }
+  #shift .lbl{ font-size:11px; letter-spacing:2px; }
   #shift .n{
-    min-width:18px; padding:1px 5px; border-radius:6px; font-size:11px; font-weight:700;
+    min-width:20px; padding:1px 6px; border-radius:6px; font-size:12px; font-weight:700;
     background:#2c3547; color:var(--dim);
   }
-  #shift:not(:disabled) .n{ background:var(--accent); color:#0b0e14; }
-  #shift:disabled{ opacity:.5; cursor:default; }
-  #shift[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent); }
-  #shift-hint{ font-size:11px; color:var(--dim); line-height:1.3; min-width:0; }
+  /* Charges in hand: the whole control goes accent, so it is obvious at a glance
+     that there is something to spend. */
+  #shift:not(:disabled){ background:var(--accent); color:#08121c; border-color:var(--accent); }
+  #shift:not(:disabled) .n{ background:rgba(8,18,28,.22); color:#08121c; }
+  #shift:disabled{ opacity:.55; cursor:default; }
+  #shift[aria-pressed="true"]{ background:var(--gold); border-color:var(--gold); color:#1a1405; }
+  #shift[aria-pressed="true"] .n{ background:rgba(26,20,5,.22); color:#1a1405; }
+  #shift.ready{ animation:charged .5s ease-out; }
+  @keyframes charged{
+    0%{   box-shadow:0 0 0 0 rgba(63,182,255,.7); }
+    100%{ box-shadow:0 0 0 14px rgba(63,182,255,0); }
+  }
+  #shift-hint{ grid-column:2; font-size:11px; color:var(--dim); line-height:1.35; min-width:0; }
+  /* Progress toward the next charge, so the economy is visible rather than implied. */
+  .meter{ grid-column:2; height:4px; border-radius:2px; background:#2c3547; overflow:hidden; }
+  .meter i{ display:block; height:100%; background:var(--accent); border-radius:2px;
+            width:0; transition:width .25s ease-out; }
   /* The armed cursor reuses the tutorial highlight, in gold to read as a different mode. */
   .cell.pick{ box-shadow:0 0 0 3px var(--gold), 0 0 18px rgba(255,209,102,.45); }
 
@@ -248,11 +269,41 @@
     #prompt{ grid-column:2; grid-row:3; font-size:12px; padding:6px 10px; }
     #tools { grid-column:2; grid-row:4; }
     #msg   { grid-column:2; grid-row:5; align-self:start; }
+    #tools { padding:6px 9px; }
     #shift-hint{ display:none; }   /* no room beside the board on short viewports */
+    #shift{ grid-row:1; }
+    .meter{ grid-column:2; }
     .stat{ padding:3px 4px; }
     .stat .k{ font-size:8px; letter-spacing:1px; }
     .legend{ display:none; }
   }
+
+  /* End-of-run panel. Shares the modal's frame so a finished game reads the same as
+     the help dialog rather than as a new kind of surface. */
+  #over{
+    position:fixed; inset:0; background:rgba(5,8,14,.9); display:none;
+    align-items:center; justify-content:center; z-index:11;
+    padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);
+  }
+  #over.open{ display:flex; animation:fadein .22s ease-out; }
+  @keyframes fadein{ from{ opacity:0; } to{ opacity:1; } }
+  #over .card{ text-align:center; align-items:stretch; gap:16px; }
+  #over h2{ font-size:20px; }
+  #over .reg{
+    font-size:clamp(20px, 7vw, 30px); font-weight:700; letter-spacing:3px; color:var(--gold);
+    word-break:break-all;
+  }
+  #over .sub{ font-size:12px; color:var(--dim); margin:-8px 0 0; }
+  #over .figs{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; }
+  #over .fig{
+    background:#0e1420; border:1px solid var(--edge); border-radius:10px; padding:9px 4px;
+  }
+  #over .fig .k{ font-size:9px; letter-spacing:1.5px; color:var(--dim); text-transform:uppercase; }
+  #over .fig .v{ font-size:clamp(15px, 5vw, 21px); font-weight:700; line-height:1.3; }
+  #over .fig.hi .v{ color:var(--gold); }
+  #over .row{ justify-content:center; }
+  #over #again{ background:var(--accent); color:#08121c; border-color:var(--accent);
+                font-size:14px; padding:10px 22px; letter-spacing:1px; }
 
   #modal{
     position:fixed; inset:0; background:rgba(5,8,14,.86); display:none;
@@ -310,14 +361,32 @@
   <div id="tools" hidden>
     <button id="shift" type="button" aria-pressed="false" disabled
             aria-label="Shift a tile left one bit">
-      <span class="op">&lt;&lt;</span><span class="n" id="shift-n">0</span>
+      <span class="op">&lt;&lt;</span><span class="lbl">SHIFT</span><span class="n" id="shift-n">0</span>
     </button>
     <span id="shift-hint"></span>
+    <div class="meter" aria-hidden="true"><i id="shift-meter"></i></div>
   </div>
 
   <div id="msg" role="status" aria-live="polite"></div>
 
   <div class="legend" id="legend"></div>
+
+  <div id="over" role="dialog" aria-modal="true" aria-labelledby="over-title" aria-hidden="true">
+    <div class="card">
+      <h2 id="over-title">Register forged</h2>
+      <div class="reg" id="over-reg">11111111</div>
+      <p class="sub" id="over-sub">255 — every bit set.</p>
+      <div class="figs">
+        <div class="fig hi"><div class="k">Score</div><div class="v" id="over-score">0</div></div>
+        <div class="fig"><div class="k">Moves</div><div class="v" id="over-moves">0</div></div>
+        <div class="fig"><div class="k">Best</div><div class="v" id="over-best">0</div></div>
+      </div>
+      <div class="row">
+        <button class="ghost" id="over-close">View board</button>
+        <button id="again">New game</button>
+      </div>
+    </div>
+  </div>
 
   <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
     <div class="card">
@@ -437,7 +506,7 @@ const TUTORIALS = {};
 
 TUTORIALS.xor = [
   {
-    title: 'Step 1 of 4 · XOR merge',
+    title: 'Step 1 of 5 · XOR merge',
     text: 'Tiles are binary. When two collide, they XOR. Swipe <b>LEFT</b> to merge 0010 and 0100 into 0110.',
     dir: 'left',
     board: [[2,4,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
@@ -445,7 +514,7 @@ TUTORIALS.xor = [
     check: g => g[0][0] === 6
   },
   {
-    title: 'Step 2 of 4 · Equal tiles cancel',
+    title: 'Step 2 of 5 · Equal tiles cancel',
     text: 'Equal tiles XOR to 0 and vanish — your cleanup tool. Swipe <b>LEFT</b> to clear these two.',
     dir: 'left',
     board: [[3,3,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
@@ -453,7 +522,7 @@ TUTORIALS.xor = [
     check: g => g[0][0] === 0 && g[0][1] === 0
   },
   {
-    title: 'Step 3 of 4 · Overlapping bits are lost',
+    title: 'Step 3 of 5 · Overlapping bits are lost',
     text: 'Shared bits cancel: 0110 ^ 0011 = 0101 — two 2-bit tiles collapse to one. Swipe <b>LEFT</b>.',
     dir: 'left',
     board: [[6,3,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
@@ -461,7 +530,17 @@ TUTORIALS.xor = [
     check: g => g[0][0] === 5
   },
   {
-    title: 'Step 4 of 4 · Forge the register',
+    title: 'Step 4 of 5 · The shift tool',
+    text: 'XOR never carries, so bit 7 can never be built by merging — it has to be '
+        + 'shifted up. You have one <b>&lt;&lt;</b> charge: press it, then pick the '
+        + '<span class="mono">01000000</span> to double it into <span class="mono">10000000</span>.',
+    tool: true,
+    board: [[64,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    hl: [[0,0]],
+    check: g => g.flat().includes(128)
+  },
+  {
+    title: 'Step 5 of 5 · Forge the register',
     text: 'Final: 11111110 ^ 00000001 = 11111111. Swipe <b>LEFT</b> to win.',
     dir: 'left',
     board: [[254,1,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
@@ -687,6 +766,10 @@ function move(dir){
 
   if(tutorial.active){
     const step = tutorialSteps()[tutorial.step];
+    if(step.tool){
+      setMsg('This one needs the << button, not a swipe.', 'nudge');
+      return;
+    }
     if(dir !== step.dir){
       setMsg('Try swiping ' + step.dir.toUpperCase() + '.', 'nudge');
       return;
@@ -751,6 +834,7 @@ function advanceTutorial(){
 function loadTutorialStep(i){
   const s = tutorialSteps()[i];
   cancelSlide();
+  armed = false; shiftsUsed = 0;   // each step starts with its own grant
   grid = s.board.map(r => r.slice());
   lastChanged = new Set();
   document.getElementById('prompt').hidden = false;
@@ -761,6 +845,7 @@ function loadTutorialStep(i){
 
 function startTutorial(){
   cancelSlide();
+  hideOver();
   armed = false; shiftsUsed = 0;
   tutorial = { active: true, step: 0 };
   won = false; over = false; score = 0; moves = 0; bytes = 0;
@@ -771,6 +856,7 @@ function startTutorial(){
 
 function startNormalGame(){
   cancelSlide();
+  hideOver();
   armed = false; shiftsUsed = 0;
   grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
   score = 0; moves = 0; won = false; over = false; bytes = 0;
@@ -787,8 +873,12 @@ function checkMilestones(forged){
   if(mode === 'xor'){
     if(won) return;
     if(grid.flat().some(v => v === 255)){
-      won = true;
-      setMsg('🎉 11111111 forged. Keep going?', 'win');
+      // Forging the register ends the run rather than continuing past it.
+      won = true; over = true;
+      armed = false;
+      setMsg(`11111111 forged in ${moves} moves. Score ${score}.`, 'win');
+      renderTools();
+      showOver();
     }
     return;
   }
@@ -796,7 +886,10 @@ function checkMilestones(forged){
   // Gate mode has no win condition — it ends when the board jams.
   if(isStuck()){
     over = true;
+    armed = false;
     setMsg(`Jammed after ${moves} moves. Score ${score}` + (bytes ? ` · ${bytes} byte${bytes>1?'s':''} forged` : '') + '.', 'over');
+    renderTools();
+    showOver();
     return;
   }
   if(forged) setMsg('11111111 forged (+' + 64 * forged + '). It blocks everything now — build another to clear it.', 'win');
@@ -956,23 +1049,40 @@ const toolsEl = document.getElementById('tools');
 const shiftBtn = document.getElementById('shift');
 const shiftHint = document.getElementById('shift-hint');
 
-const toolsAvailable = () => mode === 'xor' && !tutorial.active && !over;
-const charges = () => Math.max(0, Math.floor(score / SHIFT_COST) - shiftsUsed);
+const toolStep = () => tutorial.active && tutorialSteps()[tutorial.step].tool;
+const toolsAvailable = () => mode === 'xor' && !over && (!tutorial.active || toolStep());
+// The tutorial has no score to buy charges with, so its shift step is granted one.
+const charges = () => tutorial.active
+  ? Math.max(0, (toolStep() ? 1 : 0) - shiftsUsed)
+  : Math.max(0, Math.floor(score / SHIFT_COST) - shiftsUsed);
 // Bit 7 has nowhere to go: shifting it would push the tile out of the register.
 const canShift = (r, c) => grid[r][c] !== 0 && !(grid[r][c] & 128);
 
+let shownCharges = 0;
 function renderTools(){
   toolsEl.hidden = !toolsAvailable();
-  if(toolsEl.hidden) return;
+  if(toolsEl.hidden){ shownCharges = 0; return; }
   const n = charges();
   document.getElementById('shift-n').textContent = n;
   shiftBtn.disabled = n === 0;
   shiftBtn.setAttribute('aria-pressed', String(armed));
+  // Earning one is easy to miss mid-move, so the control announces itself.
+  if(n > shownCharges){
+    shiftBtn.classList.remove('ready');
+    void shiftBtn.offsetWidth;
+    shiftBtn.classList.add('ready');
+  }
+  shownCharges = n;
+  const toNext = SHIFT_COST - (score % SHIFT_COST);
+  document.getElementById('shift-meter').style.width =
+    (tutorial.active ? 100 : 100 * (score % SHIFT_COST) / SHIFT_COST) + '%';
   shiftHint.textContent = armed
-    ? 'Tap a tile, or use the arrow keys and Enter. Esc cancels.'
-    : n === 0
-      ? `Score ${SHIFT_COST - (score % SHIFT_COST)} more to earn a shift.`
-      : 'Doubles one tile — a 64 becomes the 128 you cannot merge your way to.';
+    ? 'Pick a tile — tap it, or use the arrow keys and Enter. Esc cancels.'
+    : tutorial.active
+      ? 'One charge, on the house.'
+      : n === 0
+        ? `Doubles a tile. Score ${toNext} more to earn one.`
+        : `Doubles one tile — a 64 becomes the 128 you cannot merge your way to.`;
 }
 
 function firstShiftable(){
@@ -1017,6 +1127,13 @@ function applyShift(r, c){
   syncTiles();
   renderStats();
   setMsg('');
+  if(tutorial.active){
+    const step = tutorialSteps()[tutorial.step];
+    if(step.check(grid)){
+      tutorialHold = setTimeout(() => { tutorialHold = 0; advanceTutorial(); }, TUTORIAL_HOLD_MS);
+    }
+    return;
+  }
   // A shift always clears bit 0, so it can never produce 255 on its own — but the
   // milestone check is cheap and keeps the win path in one place.
   checkMilestones(0);
@@ -1069,6 +1186,35 @@ if(window.visualViewport){
 window.addEventListener('orientationchange', () => setTimeout(syncHeight, 120));
 syncHeight();
 
+/* ---------- end-of-run panel ---------- */
+const overEl = document.getElementById('over');
+const overOpen = () => overEl.classList.contains('open');
+
+function showOver(){
+  const win = mode === 'xor' && won;
+  document.getElementById('over-title').textContent = win ? 'Register forged' : 'Board jammed';
+  document.getElementById('over-reg').textContent = win ? '11111111' : 'NO MOVES';
+  document.getElementById('over-sub').textContent = win
+    ? '255 — every bit set.'
+    : 'Nothing on the board can move.' + (bytes ? ` ${bytes} byte${bytes>1?'s':''} forged.` : '');
+  document.getElementById('over-score').textContent = score;
+  document.getElementById('over-moves').textContent = moves;
+  document.getElementById('over-best').textContent = best;
+  overEl.classList.add('open');
+  overEl.setAttribute('aria-hidden', 'false');
+  document.getElementById('again').focus();
+}
+
+function hideOver(){
+  overEl.classList.remove('open');
+  overEl.setAttribute('aria-hidden', 'true');
+}
+
+document.getElementById('again').addEventListener('click', () => { hideOver(); startNormalGame(); });
+// Dismissing only hides the panel — the run stays finished, and `over` keeps input off.
+document.getElementById('over-close').addEventListener('click', hideOver);
+overEl.addEventListener('click', e => { if(e.target.id === 'over') hideOver(); });
+
 /* ---------- modal ---------- */
 const modalEl = document.getElementById('modal');
 const helpBtn = document.getElementById('help');
@@ -1091,6 +1237,8 @@ function closeModal(){
 
 /* ---------- input ---------- */
 document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && overOpen()){ e.preventDefault(); hideOver(); return; }
+  if(overOpen()) return;
   if(e.key === 'Escape' && modalOpen()){ e.preventDefault(); closeModal(); return; }
   if(modalOpen()) return;
   if(e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1136,7 +1284,7 @@ let tx = 0, ty = 0, swiping = false;
 document.addEventListener('touchstart', e => {
   // The modal is a full-viewport overlay; while it is open every touch is its own.
   // Multi-touch is a pinch-zoom, not a swipe.
-  swiping = !modalOpen() && e.touches.length === 1 && !e.target.closest('button');
+  swiping = !modalOpen() && !overOpen() && e.touches.length === 1 && !e.target.closest('button');
   if(!swiping) return;
   tx = e.touches[0].clientX; ty = e.touches[0].clientY;
 }, {passive:true});
@@ -1224,6 +1372,7 @@ function applyModeChrome(){
 
 function bootMode(){
   cancelSlide();
+  hideOver();
   clearTiles();              // the outgoing rule set's board is not this one's
   lastChanged = new Set();   // no merge flash on a board we are only restoring
   armed = false; shiftsUsed = 0;
@@ -1231,8 +1380,12 @@ function bootMode(){
   applyModeChrome();
   if(loadGame()){
     render();
-    if(over) setMsg(`Jammed after ${moves} moves. Score ${score}.`, 'over');
-    else if(won && mode === 'xor') setMsg('🎉 11111111 forged. Keep going?', 'win');
+    if(over){
+      setMsg(won && mode === 'xor'
+        ? `11111111 forged in ${moves} moves. Score ${score}.`
+        : `Jammed after ${moves} moves. Score ${score}.`, won && mode === 'xor' ? 'win' : 'over');
+      showOver();
+    }
   } else if(store.get(tutKey()) === 'done'){
     startNormalGame();
   } else {
