@@ -14,6 +14,31 @@ Single-page game — no build step, no dependencies, no framework. Open `index.h
 | Equal tiles cancel | `0011 ^ 0011` | `0000` — the "delete" tool |
 | Overlapping bits are lost | `0110 ^ 0011` | `0101` — wasted potential |
 
+Tiles pack toward the edge you swiped, then pair off two at a time from that edge. So a
+row of **three** tiles normally collapses to **two** — the leading pair merges and the
+third is left over. It collapses to **one** only when that leading pair is identical,
+because equal tiles cancel to nothing:
+
+| Row (swiped left) | Result | Why |
+|---|---|---|
+| `1 2 5` | `3 5` | `1^2 = 3`, the `5` is left over |
+| `3 3 5` | `5` | `3^3 = 0`, the pair annihilates |
+
+Verified exhaustively over 2401 rows: of the three-tile rows that collapse to one, 100%
+have an identical leading pair; of those that collapse to two, none do.
+
+Cancelling and merging are deliberately kept distinguishable on screen, because the two
+outcomes are easy to confuse:
+
+- A cancelling pair visibly dissolves as it meets, rather than blinking out.
+- The tile each move spawns is kept off any square a pair just vacated. Without that,
+  since 40% of spawns are a `1`, cancelling two `1`s would routinely drop a fresh `1`
+  exactly where they vanished — reading as though they had merged into one, the precise
+  opposite of what happened. It is only a preference: if those are the only free cells,
+  the spawn still goes there.
+- The new tile also arrives a beat after any merge result, so the two never appear in the
+  same instant.
+
 Score is the number of set bits produced by merges. There is no lose state: each line
 collapses to at most two tiles per move, so the board can hold at most nine tiles and
 can never deadlock.

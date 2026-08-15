@@ -130,13 +130,24 @@
   }
   /* pop/merge use the `scale` property, not `transform`, so they compose with the
      `translate` the slide is animating instead of clobbering it. */
-  .tile.spawned{ animation:pop .13s ease-out; }
+  /* Delayed so a new tile lands after the merge results have popped, rather than at
+     the same instant — otherwise a spawn is indistinguishable from a merge result.
+     `both` holds it invisible through the delay. */
+  .tile.spawned{ animation:pop .13s ease-out .09s both; }
   .tile.merged{ animation:merge .2s ease-out; }
+  /* A pair that XORs to zero leaves nothing behind. Without this the two tiles just
+     blink out on arrival, and when a third tile lands on the same cell it reads as
+     "three tiles arbitrarily became one". Dissolving them in flight is what makes the
+     cancellation visible. */
+  /* Above the survivor: when a third tile lands on the same cell it is later in DOM
+     order, and would otherwise paint over the annihilation the player needs to see. */
+  .tile.vanish{ animation:annihilate var(--slide) ease-in both; z-index:2; }
   .tile .bin{ font-size:clamp(7px, 14cqmin, 13px); letter-spacing:.5px; opacity:.9; }
   .tile .dec{ font-size:clamp(13px, 30cqmin, 26px); font-weight:700; line-height:1; margin-top:2px; }
   .tile.dense{ color:#0b0e14; }
   @keyframes pop{ from{ scale:.6; opacity:0; } to{ scale:1; opacity:1; } }
   @keyframes merge{ 0%{ scale:.82; } 60%{ scale:1.08; } 100%{ scale:1; } }
+  @keyframes annihilate{ from{ opacity:.95; scale:1; } to{ opacity:0; scale:.5; } }
   /* Pre-2022 engines lack the independent transform properties; fall back to a
      static transform and no animation rather than piling every tile at 0,0. */
   @supports not (translate: 0px 0px){
@@ -144,11 +155,11 @@
       transform:translate(calc(var(--x) * (100% + var(--gap))), calc(var(--y) * (100% + var(--gap))));
       transition:none;
     }
-    .tile.spawned, .tile.merged{ animation:none; }
+    .tile.spawned, .tile.merged, .tile.vanish{ animation:none; }
   }
   @media (prefers-reduced-motion:reduce){
     .tile{ transition:none; }
-    .tile.spawned, .tile.merged{ animation:none; }
+    .tile.spawned, .tile.merged, .tile.vanish{ animation:none; }
     .cell{ transition:none; }
   }
 
@@ -505,12 +516,28 @@ function emptyCells(){
   return e;
 }
 
-function spawn(){
-  const e = emptyCells();
+/* `avoid` holds the cells where a pair just annihilated. Landing a new tile there
+   reads as "those two merged into this" — and since 40% of spawns are a 1, cancelling
+   two 1s otherwise produces a fresh 1 on the very square they vanished from, which is
+   the exact opposite of what happened. Only ever a preference: if those are the only
+   free cells, the spawn still has to go somewhere. */
+function spawn(avoid){
+  let e = emptyCells();
   if(!e.length) return false;
+  if(avoid && avoid.size){
+    const clear = e.filter(([r,c]) => !avoid.has(r + ',' + c));
+    if(clear.length) e = clear;
+  }
   const [r,c] = e[Math.floor(Math.random()*e.length)];
   grid[r][c] = randomTile();
   return true;
+}
+
+// Destinations where a pair cancelled to nothing on this move.
+function vanishedCells(anim){
+  const s = new Set();
+  for(const m of anim) if(m.vanish) s.add(m.toR + ',' + m.toC);
+  return s;
 }
 
 function coord(dir, i, j){
@@ -562,17 +589,19 @@ function mergeLine(line){
     if(mode === 'xor'){
       const m = a.v ^ b.v;
       // Both sources are consumed either way: they travel to the same slot and are
-      // replaced by their result, or by nothing when they cancel.
-      moves.push({ from: a.j, to: slot, gone: true });
-      moves.push({ from: b.j, to: slot, gone: true });
+      // replaced by their result, or by nothing when they cancel. `vanish` marks the
+      // second case so the pair can be seen destroying itself rather than blinking out.
+      const vanish = m === 0;
+      moves.push({ from: a.j, to: slot, gone: true, vanish });
+      moves.push({ from: b.j, to: slot, gone: true, vanish });
       if(m !== 0){ mergedAt.push(slot); out.push(m); gained += popcount(m); }
       i += 2;
       continue;
     }
 
     if(a.v === b.v){                    // equal → annihilate, the pressure valve
-      moves.push({ from: a.j, to: slot, gone: true });
-      moves.push({ from: b.j, to: slot, gone: true });
+      moves.push({ from: a.j, to: slot, gone: true, vanish: true });
+      moves.push({ from: b.j, to: slot, gone: true, vanish: true });
       gained += popcount(a.v) * 2;
       i += 2;
     } else if((a.v & b.v) === 0){       // disjoint → combine
@@ -607,7 +636,7 @@ function applyMove(dir){
     for(const m of r.moves){
       const [fr,fc] = coord(dir, i, m.from);
       const [tr,tc] = coord(dir, i, m.to);
-      anim.push({ fromR:fr, fromC:fc, toR:tr, toC:tc, gone:m.gone });
+      anim.push({ fromR:fr, fromC:fc, toR:tr, toC:tc, gone:m.gone, vanish:!!m.vanish });
     }
     return r.out;
   });
@@ -660,7 +689,7 @@ function move(dir){
   bytes += res.forged;
   moves++;
   if(score > best){ best = score; store.set(bestKey(), String(best)); }
-  spawn();
+  spawn(vanishedCells(res.anim));
   buzz(res.gained);
   renderStats();
   startSlide(res.anim);
@@ -847,7 +876,9 @@ function startSlide(anim, done){
     const id = from[m.fromR][m.fromC];
     if(!id) continue;
     moved.add(id);
-    place(tileMap.get(id).el, m.toR, m.toC);
+    const el = tileMap.get(id).el;
+    place(el, m.toR, m.toC);
+    if(m.vanish) el.classList.add('vanish');
     if(m.gone) dying.push(id);
     else to[m.toR][m.toC] = id;
   }
