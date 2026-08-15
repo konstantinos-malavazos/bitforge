@@ -51,21 +51,11 @@ can never deadlock.
 
 Controls: swipe, arrow keys, or WASD.
 
-## Teaching the rules
-
-The rules are explained at two levels, deliberately, because playtesters bounced off the
-bit theory.
-
-The **tutorials and the always-visible legend** describe a tile as a row of eight slots:
-two `1`s in the same slot cancel out, a `1` and a `0` make a `1`, and the shift tool
-slides a tile's `1`s one place left. No XOR, no bit numbering, no *disjoint* or
-*annihilate*, and nothing is *forged* — you fill a row.
-
-The **How-to-play dialog** keeps the same rules stated as bit operations. That is the
-layer for a player who wants to know why the game behaves the way it does, and it is
-reached by choice rather than handed to everyone on the first screen.
-
-Both describe identical behaviour. When changing a rule, change it in both places.
+The tutorials and the on-screen legend explain a tile as a row of eight slots — two `1`s
+in the same slot cancel, a `1` with a `0` makes a `1` — because playtesters bounced off
+the bit theory. They still name the mechanics `merge`, `cancel` and `forge`; only the
+explanation underneath them is plainer. The How-to-play dialog keeps the full bit-level
+statement of the same rules.
 
 ## The shift tool
 
@@ -96,17 +86,21 @@ not accept a swipe, so the tool is met before it is needed.
 ## Ending a run
 
 Forging `11111111` ends the game rather than continuing past it. A panel reports the
-score, the move count and the best score, and offers a new game or *Keep going*, which
-carries the position into endless mode; *View board* dismisses it to look at the final
-position, but the run stays finished and input stays off. A finished run reloads with its
-panel intact. Gate mode's jam uses the same panel, since both are terminal states and
-should not read differently.
+score, the move count and the best score, and offers a new game; *View board* dismisses
+it to look at the final position, but the run stays finished and input stays off. A
+finished run reloads with its panel intact. Gate mode's jam uses the same panel, since
+both are terminal states and should not read differently.
 
 ## Rule sets
 
-Three rule sets ship side by side. Pick one with the toggle in the How-to-play dialog, or
-with `?rules=xor` / `?rules=gate` / `?rules=endless`. Saved games, best scores and tutorial
-progress are tracked separately per rule set, so switching never destroys the other's run.
+Two rule sets ship side by side. Pick one with the toggle in the How-to-play dialog, or
+with `?rules=xor` / `?rules=gate`. Saved games, best scores and tutorial progress are
+tracked separately per rule set, so switching never destroys the other's run.
+
+Gate shows a gold `GATE` badge in the header, because it blocks tiles that xor would have
+merged — which reads as the game being broken rather than as a different game. Tapping the
+badge opens the toggle, so noticing and getting back out are one gesture. The default rule
+set shows no badge; one that is always on is not a signal.
 
 **`xor`** (default) — the original. Every adjacent pair merges, unconditionally.
 
@@ -136,33 +130,6 @@ Measured over 200 in-browser games under random play:
 Under 1-ply greedy play in the offline simulator, `gate` scores 1408 median against 976
 for random — so direction choice is worth about 44%, where the original's outcome is
 mostly determined by the spawn sequence.
-
-**`endless`** — XOR rules with the finish line removed. The register stops being the goal
-and becomes the currency.
-
-| Collision | Rule |
-|---|---|
-| Two ordinary tiles | XOR, exactly as in `xor` |
-| A register and anything else | **block** — the register is a wall |
-| Two registers | **discharge**: both annihilate, `+500` |
-| Two registers, neither built with a shift | discharge, `+2000` |
-
-The wall rule is not decoration, it is what makes the mode possible. Left as an ordinary
-tile a `11111111` XORs with the first thing it touches and stops being a register
-immediately: over 300 simulated runs of 800 moves, a 255-pair collision happened **zero
-times**. Registers have to persist before a pair can ever meet.
-
-The purity bonus is the anti-farming rule. Bit 7 is 1.5% of spawns, so almost every
-register is built with a `<<` charge; one built entirely around a naturally spawned `128`
-is rare and pays four times as much. Measured across move budgets, 13–15% of discharges
-qualify, so it lands as a jackpot rather than the normal outcome. Every tile carries a
-flag recording whether a shift is in its ancestry, propagated through merges — a result is
-marked if either operand was — and persisted with the save.
-
-Forging `11111111` in `xor` mode now offers **Keep going**, which carries that finished
-position into `endless`: the register just forged becomes the first wall, which is exactly
-the position the mode wants to open on. If an endless run is already in progress it is
-resumed instead, rather than being overwritten.
 
 ## Layout
 
@@ -317,60 +284,23 @@ Two alternatives were measured and rejected:
   baseline of 199. With only ~4.5 tiles on a board where every unequal pair merges on
   contact, identical tiles almost never meet, so the ladder never fires. Removing high
   spawns to force the ladder drops the win rate to **0%**.
-
-### Endless scoring
-
-The worry going in was that a big payout for `255 ^ 255` would feed the shift economy —
-charges are derived from score, so a large enough bonus buys the charges that manufacture
-the next pair, and the run runs away. It was measured rather than reasoned about, with
-three policies: a **forger** that drives toward the next register, a **farmer** that dumps
-its whole charge stockpile chain-shifting tiles up to bit 7, and a **spender** that burns
-charges tuning ordinary merges. Score per move, as the move budget grows:
-
-| Discharge schedule | 200 mv | 800 mv | 3200 mv | |
-|---|---|---|---|---|
-| flat 500 | 3.3 | 4.5 | 4.5 | stable |
-| flat 2000 | 3.3 | 8.2 | 8.3 | stable |
-| linear `100·n` | 3.3 | 3.6 | 4.4 | creeping |
-| geometric `100·2ⁿ` | 3.3 | 3.6 | **11.2** | diverges |
-
-**The blow-up lives entirely in the bonus schedule, not in the charge economy.** Any flat
-schedule is stable at any size; an escalating one diverges without bound. So the discharge
-is flat, and the purity bonus is a fixed multiplier rather than a streak.
-
-The feedback loop itself did not survive contact with the numbers. The farmer scores the
-same as the forger to within 1% under every schedule and every charge source tried
-(`score/50`, a cap of 12, `score/150`, `moves/25`, one per forged byte). The reason is
-that charges are not the binding constraint: a long run banks ~70 and a forger spends ~7.
-What limits registers is getting a complement to the `128` before it merges away, which is
-board dynamics. `SHIFT_COST` therefore stays at 50 — changing it would be tuning against a
-problem that is not there.
-
-The spender is the one policy that gains: 92 charges spent instead of 7, for ~27% more
-score. It plateaus (3.8 → 5.9 per move, flat from 800 moves on), so it is a bounded edge
-for spending charges well rather than an exploit. One visible consequence remains: because
-endless runs score roughly ten times an ordinary one, the `<<` button routinely shows tens
-of banked charges, which reads as less "earned" than it does in `xor`.
-
-Two further findings, both of which killed an idea:
-
-- **Endless has no lose state, and cannot easily be given one.** The hope was that walls
-  would accumulate and jam the board, importing gate's ending into xor. They do not: peak
-  occupancy is 8 of 16 and **0%** of runs ended in 3000 moves, across every policy. Each
-  line still collapses to at most two tiles, so one wall barely moves the bound, and a
-  second register discharges the first on contact rather than piling up. `isStuck()` is
-  still checked every move — cheap, and correct if a position ever does deadlock — but the
-  mode is a score chase, not a survival one.
-- **Simulator policies need an explicit reason to cash in.** A greedy player scored *worse
-  than random* (skill gap 0.5×) until the direction search was given a forge term. Holding
-  a complementary pair scores well on any positional heuristic, and merging it destroys
-  that score, so the player hoards the pair forever and never wins. The same bug appears
-  one level up in endless: a score-objective greedy forges a median of 1 register in 800
-  moves, because turning a good pair into a wall looks like a loss.
-
-For scale: an `xor` run ends at a median score of **262**, and an 800-move endless run
-scores about **3,600**, of which ~28% comes from discharges. That gap is why endless keeps
-its own best score — a shared one would bury the `xor` result permanently.
+- **An endless mode** — built and removed. Forging `11111111` no longer ended the run;
+  the register became a wall that only a second register could clear, and that collision
+  scored. It played badly: a tile that refuses to merge does not read as this game, it
+  reads as a bug. The measurements are worth keeping if it is ever revisited.
+  - The wall was not optional. Left as an ordinary tile a `255` XORs with the first thing
+    it touches and stops being a register, so over 300 runs of 800 moves a register pair
+    collided **zero** times. Making the payoff reachable *requires* breaking merging.
+  - It could not be given a lose state. Peak occupancy 8/16 and **0%** of runs ended in
+    3000 moves — each line still collapses to at most two tiles, and a second register
+    clears the first rather than piling up.
+  - Score inflation lives in the payout schedule, not the shift economy. Flat payouts are
+    stable at any size (flat 2000 holds at 8.3/move from 800 to 3200 moves); `100·n`
+    creeps to 4.4 and `100·2ⁿ` diverges to 11.2 and climbing.
+  - The feared `score → charges → register → score` loop does not exist. A policy that
+    dumps its whole charge stockpile chain-shifting to bit 7 scores within **1%** of one
+    that does not, under every payout schedule and charge source tried. Charges are not
+    the binding constraint: a long run banks ~70 and spends ~7.
 
 ## License
 

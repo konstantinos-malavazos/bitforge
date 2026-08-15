@@ -304,11 +304,6 @@
   #over .row{ justify-content:center; }
   #over #again{ background:var(--accent); color:#08121c; border-color:var(--accent);
                 font-size:14px; padding:10px 22px; letter-spacing:1px; }
-  /* Carrying on stays a deliberate secondary choice. It changes rule set, and a player
-     who just hit the biggest button to start another game should not land somewhere
-     that blocks tiles xor would have merged. */
-  #over #keep{ font-size:12px; }
-  #over #keep[hidden]{ display:none; }
 
   #modal{
     position:fixed; inset:0; background:rgba(5,8,14,.86); display:none;
@@ -334,7 +329,7 @@
                   text-transform:uppercase; margin-right:auto; }
   .modeswitch button[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent); }
   .card .note{ margin:0; font-size:12px; color:var(--dim); line-height:1.45; }
-  #rules-xor[hidden], #rules-gate[hidden], #rules-endless[hidden]{ display:none; }
+  #rules-xor[hidden], #rules-gate[hidden]{ display:none; }
   #msg.over{ color:var(--gold); font-weight:700; }
   #modebadge{ background:var(--gold); color:#08121c; border-color:var(--gold);
               font-size:10px; letter-spacing:1.5px; font-weight:700; padding:5px 9px;
@@ -346,9 +341,9 @@
   <div class="topbar">
     <h1>Bit<span>Forge</span></h1>
     <div class="acts">
-      <!-- Only the non-default rule sets announce themselves. Both of them block
-           tiles that xor would have merged, which reads as the game being broken
-           if you do not know you switched. Tapping it opens the rules toggle. -->
+      <!-- Gate blocks tiles that xor would have merged, which reads as the game being
+           broken if you do not know you switched rule set. Nothing else on the main
+           screen says which one is running. Tapping it opens the rules toggle. -->
       <button id="modebadge" hidden></button>
       <button id="install" hidden>Install</button>
       <button id="newgame">New</button>
@@ -397,7 +392,6 @@
       <div class="row">
         <button class="ghost" id="over-close">View board</button>
         <button id="again">New game</button>
-        <button class="ghost" id="keep" hidden>Try Endless rules →</button>
       </div>
     </div>
   </div>
@@ -420,19 +414,6 @@
         <li>Score = total bits set on merges. No lose state — it's a puzzle, take your time.</li>
       </ul>
 
-      <ul id="rules-endless">
-        <li>XOR rules, but forging <span class="mono">11111111</span> no longer ends the run.</li>
-        <li><b>A forged register is a wall.</b> It stops merging with ordinary tiles and
-          sits there — only a second register can shift it.</li>
-        <li><b>Two registers discharge.</b> They annihilate each other for
-          <span class="mono">+500</span>. That collision is the whole point of the mode.</li>
-        <li><b>Forge one the hard way for <span class="mono">+2000</span>.</b> If both registers
-          were built without ever spending a <span class="mono">&lt;&lt;</span> charge — bit 7
-          spawned on its own and you built around it — the discharge pays four times as much.</li>
-        <li>The shift tool works here, and you will need it: bit 7 is only 1.5% of spawns.</li>
-        <li>No goal and no lose state. Play for score.</li>
-      </ul>
-
       <ul id="rules-gate">
         <li>Every tile is an <span class="mono">8-bit number</span>. Collisions have three outcomes.</li>
         <li><b>No shared bits → combine.</b>
@@ -451,7 +432,6 @@
         <span class="k">Rules</span>
         <button id="mode-xor" data-mode="xor">XOR</button>
         <button id="mode-gate" data-mode="gate">Gate</button>
-        <button id="mode-endless" data-mode="endless">Endless</button>
       </div>
       <p class="note" id="mode-note"></p>
 
@@ -465,39 +445,23 @@
 <script>
 const SIZE = 4;
 
-/* Three rule sets live side by side so they can be compared without a rebuild.
-   'xor'     — the original: every adjacent pair merges, unconditionally.
-   'gate'    — prototype: disjoint bits combine, equal tiles annihilate, any
-               overlap BLOCKS. The blocking is what fills the board and makes a
-               lose state possible at all; under 'xor' the board tops out at nine
-               tiles and can never jam.
-   'endless' — XOR rules, except a forged register stops merging and becomes a
-               wall, so two of them can meet and discharge. That collision is the
-               mode's payoff and the only reason 255s persist: measured over 300
-               simulated runs, leaving 255 an ordinary tile produced a discharge
-               exactly zero times, because it XORs with the first thing it touches.
-   Select with ?rules=gate / ?rules=endless, or the toggle in the How-to-play dialog. */
-const MODES = ['xor', 'gate', 'endless'];
+/* Two rule sets live side by side so they can be compared without a rebuild.
+   'xor'  — the original: every adjacent pair merges, unconditionally.
+   'gate' — prototype: disjoint bits combine, equal tiles annihilate, any
+            overlap BLOCKS. The blocking is what fills the board and makes a
+            lose state possible at all; under 'xor' the board tops out at nine
+            tiles and can never jam.
+   Select with ?rules=gate, or the toggle in the How-to-play dialog. */
+const MODES = ['xor', 'gate'];
 let mode = 'xor';
 
-/* Saves are per-mode: the rule sets produce incompatible positions. The keys keep
-   the old xor2048. prefix on purpose — renaming them would orphan existing saves. */
-const keyFor = (kind, m) => `xor2048.${kind}.${m}.v2`;
-const saveKey = () => keyFor('save', mode);
-const bestKey = () => keyFor('best', mode);
-const tutKey  = () => keyFor('tutorial', mode);
+// Saves are per-mode: the two rule sets produce incompatible positions.
+const saveKey = () => `xor2048.save.${mode}.v2`;
+const bestKey = () => `xor2048.best.${mode}.v2`;
+const tutKey  = () => `xor2048.tutorial.${mode}.v2`;
 const MODE_KEY = 'xor2048.mode.v2';
 
 let grid, score, moves, won, over, bytes, best = 0;
-/* Endless pays four times as much for a register pair that was built without the
-   shift tool, so every tile has to remember whether a shift is in its ancestry.
-   `shifted[r][c]` carries that flag; it propagates through merges (a result is
-   marked if either operand was) and is cleared on spawn. Maintained in every mode
-   so save/load stays uniform — only endless reads it. */
-let shifted;
-const blankFlags = () => Array.from({length:SIZE}, () => Array(SIZE).fill(false));
-const DISCHARGE = 500;        // register pair, at least one built with the tool
-const DISCHARGE_PURE = 2000;  // both built from a naturally spawned bit 7
 /* Shift charges are bought with score rather than waited for, which is the whole
    point: under XOR nothing carries, so bit 7 can otherwise only arrive as a
    literal 128 spawn (1.5% of spawns — a median 44-move wait). Earning the tool
@@ -519,7 +483,7 @@ const store = {
 
 function saveGame(){
   if(tutorial.active) return;
-  store.set(saveKey(), JSON.stringify({ grid, score, moves, won, over, bytes, shiftsUsed, shifted }));
+  store.set(saveKey(), JSON.stringify({ grid, score, moves, won, over, bytes, shiftsUsed }));
 }
 function loadGame(){
   const raw = store.get(saveKey());
@@ -530,11 +494,6 @@ function loadGame(){
     if(!s.grid.every(r => Array.isArray(r) && r.length === SIZE
                           && r.every(v => Number.isInteger(v) && v >= 0 && v <= 255))) return false;
     grid = s.grid.map(r => r.slice());
-    // A save from before endless existed has no flags. Treating those tiles as
-    // tool-free is the generous reading, and it only affects a mode they never played.
-    shifted = Array.isArray(s.shifted) && s.shifted.length === SIZE
-      ? s.shifted.map(r => Array.from({length:SIZE}, (_, c) => !!r[c]))
-      : blankFlags();
     score = Number(s.score) || 0;
     moves = Number(s.moves) || 0;
     bytes = Number(s.bytes) || 0;
@@ -555,32 +514,31 @@ const TUTORIALS = {};
 
 TUTORIALS.xor = [
   {
-    title: 'Step 1 of 5 · Tiles combine',
+    title: 'Step 1 of 5 · XOR merge',
     text: 'Every tile is a row of eight slots, each holding a <span class="mono">0</span> or a '
-        + '<span class="mono">1</span>. When two tiles meet, the slots pair up — a '
-        + '<span class="mono">1</span> and a <span class="mono">0</span> make a '
-        + '<span class="mono">1</span>. Swipe <b>LEFT</b> to push these together.',
+        + '<span class="mono">1</span>. When two tiles collide they <b>merge</b>: the slots pair up, '
+        + 'and a <span class="mono">1</span> with a <span class="mono">0</span> makes a '
+        + '<span class="mono">1</span>. Swipe <b>LEFT</b> to merge 0010 and 0100 into 0110.',
     dir: 'left',
     board: [[2,4,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0],[0,1]],
     check: g => g[0][0] === 6
   },
   {
-    title: 'Step 2 of 5 · Two 1s cancel',
-    text: 'Where both tiles hold a <span class="mono">1</span> in the same slot, the pair cancels out '
-        + 'and leaves a <span class="mono">0</span>. These two are identical, so every slot cancels '
-        + 'and both vanish — your cleanup tool. Swipe <b>LEFT</b>.',
+    title: 'Step 2 of 5 · Equal tiles cancel',
+    text: 'Where both tiles hold a <span class="mono">1</span> in the same slot, the pair '
+        + '<b>cancels</b> to <span class="mono">0</span>. Equal tiles cancel in every slot, so both '
+        + 'vanish — your cleanup tool. Swipe <b>LEFT</b> to clear these two.',
     dir: 'left',
     board: [[3,3,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0],[0,1]],
     check: g => g[0][0] === 0 && g[0][1] === 0
   },
   {
-    title: 'Step 3 of 5 · Mind the overlap',
-    text: 'These two hold a <span class="mono">1</span> in the same slot, so that pair cancels and is '
-        + 'lost. <span class="mono">00000110</span> and <span class="mono">00000011</span> leave '
-        + '<span class="mono">00000101</span> — four <span class="mono">1</span>s go in, two come out. '
-        + 'Swipe <b>LEFT</b>.',
+    title: 'Step 3 of 5 · Overlapping bits are lost',
+    text: 'These two share a <span class="mono">1</span> in the same slot, so that pair cancels and '
+        + 'is lost: <span class="mono">0110 ^ 0011 = 0101</span> — four <span class="mono">1</span>s '
+        + 'go in, two come out. Swipe <b>LEFT</b>.',
     dir: 'left',
     board: [[6,3,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0],[0,1]],
@@ -588,19 +546,20 @@ TUTORIALS.xor = [
   },
   {
     title: 'Step 4 of 5 · The shift tool',
-    text: 'Combining tiles can never put a <span class="mono">1</span> in the leftmost slot — it has '
-        + 'to be carried there. The <b>&lt;&lt;</b> button slides every <span class="mono">1</span> in '
-        + 'a tile one place left. You have one charge: press it, then pick this tile.',
+    text: 'Merging can never put a <span class="mono">1</span> in the leftmost slot — it has to be '
+        + 'shifted up. The <b>&lt;&lt;</b> button slides every <span class="mono">1</span> in a tile '
+        + 'one place left. You have one charge: press it, then pick the '
+        + '<span class="mono">01000000</span> to double it into <span class="mono">10000000</span>.',
     tool: true,
     board: [[64,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0]],
     check: g => g.flat().includes(128)
   },
   {
-    title: 'Step 5 of 5 · Fill the row',
+    title: 'Step 5 of 5 · Forge the register',
     text: 'One slot left. The small tile holds its <span class="mono">1</span> exactly where the big '
-        + 'one holds a <span class="mono">0</span>, so together they fill every slot. Swipe '
-        + '<b>LEFT</b> to win.',
+        + 'one holds a <span class="mono">0</span>, so merging them fills every slot: '
+        + '<span class="mono">11111110 ^ 00000001 = 11111111</span>. Swipe <b>LEFT</b> to win.',
     dir: 'left',
     board: [[254,1,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0],[0,1]],
@@ -610,26 +569,28 @@ TUTORIALS.xor = [
 
 TUTORIALS.gate = [
   {
-    title: 'Step 1 of 4 · Tiles that fit, join',
-    text: 'Here two tiles join only if they never both hold a <span class="mono">1</span> in the same '
-        + 'slot. These two never clash, so they fit together. Swipe <b>LEFT</b>.',
+    title: 'Step 1 of 4 · Disjoint bits combine',
+    text: 'Here two tiles merge only if they never both hold a <span class="mono">1</span> in the same '
+        + 'slot. <span class="mono">0010</span> and <span class="mono">0100</span> never clash, so '
+        + 'they fit together. Swipe <b>LEFT</b>.',
     dir: 'left',
     board: [[2,4,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0],[0,1]],
     check: g => g[0][0] === 6
   },
   {
-    title: 'Step 2 of 4 · Tiles that clash, block',
-    text: 'These two both hold a <span class="mono">1</span> in the same slot, so they refuse to join '
-        + 'and stack up instead. Swipe <b>LEFT</b> and watch them jam.',
+    title: 'Step 2 of 4 · Shared bits block',
+    text: '<span class="mono">0110</span> and <span class="mono">0011</span> both hold a '
+        + '<span class="mono">1</span> in the same slot, so they refuse to merge and stack up '
+        + 'instead. Swipe <b>LEFT</b> and watch them jam.',
     dir: 'left',
     board: [[6,0,3,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0],[0,2]],
     check: g => g[0][0] === 6 && g[0][1] === 3
   },
   {
-    title: 'Step 3 of 4 · Identical tiles wipe out',
-    text: 'Two identical tiles cancel each other completely — your only way to unjam a crowded board. '
+    title: 'Step 3 of 4 · Equal tiles annihilate',
+    text: 'Identical tiles cancel out completely — your only way to unjam a crowded board. '
         + 'Swipe <b>LEFT</b>.',
     dir: 'left',
     board: [[3,0,3,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
@@ -637,60 +598,14 @@ TUTORIALS.gate = [
     check: g => g[0][0] === 0 && g[0][1] === 0
   },
   {
-    title: 'Step 4 of 4 · A full row is a wall',
-    text: 'These two fit together and fill every slot. A full row clashes with every other tile, so '
-        + 'nothing can join it — only a second full row clears it. Swipe <b>LEFT</b>.',
+    title: 'Step 4 of 4 · A full byte is a wall',
+    text: '<span class="mono">11111110</span> and <span class="mono">00000001</span> never clash, so they '
+        + 'forge <span class="mono">11111111</span>. A full register clashes with every tile — only a '
+        + 'second one clears it. Swipe <b>LEFT</b>.',
     dir: 'left',
     board: [[254,1,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
     hl: [[0,0],[0,1]],
     check: g => g.flat().includes(255)
-  }
-];
-
-/* Endless is reachable directly (?rules=endless, or the toggle) without ever having
-   played xor, so it teaches the XOR merge and the shift tool from scratch before the
-   two rules that are its own. */
-TUTORIALS.endless = [
-  {
-    title: 'Step 1 of 4 · Tiles combine',
-    text: 'Every tile is a row of eight slots, each holding a <span class="mono">0</span> or a '
-        + '<span class="mono">1</span>. When two tiles meet, the slots pair up: a '
-        + '<span class="mono">1</span> and a <span class="mono">0</span> make a '
-        + '<span class="mono">1</span>, and two <span class="mono">1</span>s cancel out. '
-        + 'Swipe <b>LEFT</b>.',
-    dir: 'left',
-    board: [[2,4,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
-    hl: [[0,0],[0,1]],
-    check: g => g[0][0] === 6
-  },
-  {
-    title: 'Step 2 of 4 · The shift tool',
-    text: 'Combining tiles can never put a <span class="mono">1</span> in the leftmost slot — it has '
-        + 'to be carried there. The <b>&lt;&lt;</b> button slides every <span class="mono">1</span> in '
-        + 'a tile one place left. You have one charge: press it, then pick this tile.',
-    tool: true,
-    board: [[64,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
-    hl: [[0,0]],
-    check: g => g.flat().includes(128)
-  },
-  {
-    title: 'Step 3 of 4 · A full row is a wall',
-    text: 'This tile is already full — every slot is a <span class="mono">1</span>. A full row stops '
-        + 'combining with ordinary tiles and just sits there. Swipe <b>LEFT</b> and watch the small '
-        + 'tile stop dead against it.',
-    dir: 'left',
-    board: [[255,0,3,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
-    hl: [[0,0],[0,2]],
-    check: g => g[0][0] === 255 && g[0][1] === 3
-  },
-  {
-    title: 'Step 4 of 4 · Slam two together',
-    text: 'Only another full row can move the first. Swipe <b>LEFT</b> to crash them together — they '
-        + 'wipe each other out, and that collision is what this whole mode is for.',
-    dir: 'left',
-    board: [[255,0,255,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
-    hl: [[0,0],[0,2]],
-    check: g => g[0][0] === 0 && g[0][1] === 0
   }
 ];
 
@@ -735,7 +650,6 @@ function spawn(avoid){
   }
   const [r,c] = e[Math.floor(Math.random()*e.length)];
   grid[r][c] = randomTile();
-  shifted[r][c] = false;   // a fresh tile owes nothing to the tool
   return true;
 }
 
@@ -753,79 +667,44 @@ function coord(dir, i, j){
   return [SIZE-1-j, i];
 }
 
-function getLines(dir, src = grid){
+function getLines(dir){
   const lines = [];
   for(let i=0;i<SIZE;i++){
     const line = [];
-    for(let j=0;j<SIZE;j++){ const [r,c] = coord(dir,i,j); line.push(src[r][c]); }
+    for(let j=0;j<SIZE;j++){ const [r,c] = coord(dir,i,j); line.push(grid[r][c]); }
     lines.push(line);
   }
   return lines;
 }
 
-function setLines(dir, lines, dst = grid){
+function setLines(dir, lines){
   for(let i=0;i<SIZE;i++){
-    for(let j=0;j<SIZE;j++){ const [r,c] = coord(dir,i,j); dst[r][c] = lines[i][j]; }
+    for(let j=0;j<SIZE;j++){ const [r,c] = coord(dir,i,j); grid[r][c] = lines[i][j]; }
   }
 }
 
 // Advancing i by 2 on a merge is what stops a tile merging twice in one move;
 // on a block only the leading tile settles, so the follower is reconsidered
 // against whatever comes next.
-function mergeLine(line, flagLine){
+function mergeLine(line){
   // Positions are carried along so the animation knows which slot each tile came
   // from — the pairing is invisible in the result otherwise.
   const tiles = [];
-  for(let j = 0; j < line.length; j++) if(line[j] !== 0) tiles.push({ v: line[j], j, t: !!(flagLine && flagLine[j]) });
+  for(let j = 0; j < line.length; j++) if(line[j] !== 0) tiles.push({ v: line[j], j });
 
   const out = [];
-  const outFlags = [];   // shift-ancestry flag travelling with each output tile
   const mergedAt = [];   // output indices produced by a merge, for the flash
   const moves = [];      // {from, to, gone} per source tile, for the slide
-  let gained = 0, forged = 0, discharged = 0, pureDischarged = 0;
-  const keep = (v, t) => { out.push(v); outFlags.push(t); };
+  let gained = 0, forged = 0;
   let i = 0;
   while(i < tiles.length){
     const a = tiles[i];
     const slot = out.length;   // where this step's result lands
     if(i + 1 >= tiles.length){
       moves.push({ from: a.j, to: slot, gone: false });
-      keep(a.v, a.t); i += 1; continue;
+      out.push(a.v); i += 1; continue;
     }
     const b = tiles[i+1];
-
-    if(mode === 'endless'){
-      /* A forged register stops taking part in ordinary merges and becomes a wall,
-         exactly as it already does under gate rules. Only a second register moves
-         it, and that collision is the mode's payoff. */
-      if(a.v === 255 || b.v === 255){
-        if(a.v === 255 && b.v === 255){
-          const pure = !a.t && !b.t;
-          moves.push({ from: a.j, to: slot, gone: true, vanish: true });
-          moves.push({ from: b.j, to: slot, gone: true, vanish: true });
-          gained += pure ? DISCHARGE_PURE : DISCHARGE;
-          discharged++;
-          if(pure) pureDischarged++;
-          i += 2;
-        } else {                       // wall: only the leading tile settles
-          moves.push({ from: a.j, to: slot, gone: false });
-          keep(a.v, a.t);
-          i += 1;
-        }
-        continue;
-      }
-      const m = a.v ^ b.v;
-      const t = a.t || b.t;
-      const vanish = m === 0;
-      moves.push({ from: a.j, to: slot, gone: true, vanish });
-      moves.push({ from: b.j, to: slot, gone: true, vanish });
-      if(m !== 0){
-        mergedAt.push(slot); keep(m, t); gained += popcount(m);
-        if(m === 255) forged++;
-      }
-      i += 2;
-      continue;
-    }
 
     if(mode === 'xor'){
       const m = a.v ^ b.v;
@@ -835,7 +714,7 @@ function mergeLine(line, flagLine){
       const vanish = m === 0;
       moves.push({ from: a.j, to: slot, gone: true, vanish });
       moves.push({ from: b.j, to: slot, gone: true, vanish });
-      if(m !== 0){ mergedAt.push(slot); keep(m, a.t || b.t); gained += popcount(m); }
+      if(m !== 0){ mergedAt.push(slot); out.push(m); gained += popcount(m); }
       i += 2;
       continue;
     }
@@ -850,34 +729,29 @@ function mergeLine(line, flagLine){
       mergedAt.push(slot);
       moves.push({ from: a.j, to: slot, gone: true });
       moves.push({ from: b.j, to: slot, gone: true });
-      keep(m, a.t || b.t);
+      out.push(m);
       gained += popcount(m) * popcount(m);
       if(m === 255) forged++;
       i += 2;
     } else {                            // overlap → block
       moves.push({ from: a.j, to: slot, gone: false });
-      keep(a.v, a.t);
+      out.push(a.v);
       i += 1;
     }
   }
-  while(out.length < SIZE){ out.push(0); outFlags.push(false); }
-  return { out, outFlags, gained, mergedAt, forged, discharged, pureDischarged, moves };
+  while(out.length < SIZE) out.push(0);
+  return { out, gained, mergedAt, forged, moves };
 }
 
 function applyMove(dir){
   const before = grid.flat().join(',');
-  let gained = 0, forged = 0, discharged = 0, pureDischarged = 0;
+  let gained = 0, forged = 0;
   const merged = new Set();
   const anim = [];
-  const flagLines = getLines(dir, shifted);
-  const nextFlags = [];
   const next = getLines(dir).map((l, i) => {
-    const r = mergeLine(l, flagLines[i]);
-    nextFlags.push(r.outFlags);
+    const r = mergeLine(l);
     gained += r.gained;
     forged += r.forged || 0;
-    discharged += r.discharged || 0;
-    pureDischarged += r.pureDischarged || 0;
     for(const j of r.mergedAt){ const [rr,cc] = coord(dir, i, j); merged.add(rr+','+cc); }
     for(const m of r.moves){
       const [fr,fc] = coord(dir, i, m.from);
@@ -887,19 +761,16 @@ function applyMove(dir){
     return r.out;
   });
   setLines(dir, next);
-  setLines(dir, nextFlags, shifted);
-  return { changed: grid.flat().join(',') !== before, gained, merged, forged, discharged, pureDischarged, anim };
+  return { changed: grid.flat().join(',') !== before, gained, merged, forged, anim };
 }
 
 // Gate mode can genuinely deadlock, so this has to be exact rather than a
 // "board is full" heuristic: a full board may still have a legal merge.
 function isStuck(){
   const saved = grid.map(r => r.slice());
-  const savedFlags = shifted.map(r => r.slice());
   for(const d of ['left','right','up','down']){
     const changed = applyMove(d).changed;
     grid = saved.map(r => r.slice());
-    shifted = savedFlags.map(r => r.slice());
     if(changed) return false;
   }
   return true;
@@ -946,7 +817,7 @@ function move(dir){
   buzz(res.gained);
   renderStats();
   startSlide(res.anim);
-  checkMilestones(res);
+  checkMilestones(res.forged);
   saveGame();
 }
 
@@ -973,9 +844,7 @@ function advanceTutorial(){
     startNormalGame();
     setMsg(mode === 'gate'
       ? 'Tutorial complete! Now play for score — the board fills up. 🎯'
-      : mode === 'endless'
-        ? 'Tutorial complete! Fill rows, then slam them together. 🎯'
-        : 'Tutorial complete! Now fill every slot for real. 🎯', 'win');
+      : 'Tutorial complete! Now forge 255 for real. 🎯', 'win');
   } else {
     loadTutorialStep(tutorial.step);
     render();
@@ -987,7 +856,6 @@ function loadTutorialStep(i){
   cancelSlide();
   armed = false; shiftsUsed = 0;   // each step starts with its own grant
   grid = s.board.map(r => r.slice());
-  shifted = blankFlags();
   lastChanged = new Set();
   document.getElementById('prompt').hidden = false;
   document.getElementById('prompt-step').textContent = s.title;
@@ -1011,7 +879,6 @@ function startNormalGame(){
   hideOver();
   armed = false; shiftsUsed = 0;
   grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
-  shifted = blankFlags();
   score = 0; moves = 0; won = false; over = false; bytes = 0;
   lastChanged = new Set();
   tutorial.active = false;
@@ -1022,34 +889,7 @@ function startNormalGame(){
   saveGame();
 }
 
-function checkMilestones(res = {}){
-  const forged = res.forged || 0;
-
-  if(mode === 'endless'){
-    /* Simulation puts an endless board at 8 cells of 16 at its fullest and it never
-       jammed in thousands of runs — each line still collapses to at most two tiles,
-       so a wall does not change the bound much. Checked rather than assumed: if a
-       position ever does deadlock, the run ends instead of freezing. */
-    if(isStuck()){
-      over = true;
-      armed = false;
-      setMsg(`Jammed after ${moves} moves. Score ${score}.`, 'over');
-      renderTools();
-      showOver();
-      return;
-    }
-    if(res.discharged){
-      const pure = res.pureDischarged || 0;
-      const points = DISCHARGE_PURE * pure + DISCHARGE * (res.discharged - pure);
-      setMsg(pure
-        ? `Clean discharge — built without the tool. +${points}`
-        : `Discharge! +${points}`, 'win');
-    } else if(forged){
-      setMsg('Row filled! It is a wall now — build a second one to clear it.', 'win');
-    }
-    return;
-  }
-
+function checkMilestones(forged){
   if(mode === 'xor'){
     if(won) return;
     if(grid.flat().some(v => v === 255)){
@@ -1230,9 +1070,7 @@ const shiftBtn = document.getElementById('shift');
 const shiftHint = document.getElementById('shift-hint');
 
 const toolStep = () => tutorial.active && tutorialSteps()[tutorial.step].tool;
-// Endless needs the tool as much as xor does: bit 7 is still only 1.5% of spawns,
-// and every register after the first one has to be manufactured.
-const toolsAvailable = () => mode !== 'gate' && !over && (!tutorial.active || toolStep());
+const toolsAvailable = () => mode === 'xor' && !over && (!tutorial.active || toolStep());
 // The tutorial has no score to buy charges with, so its shift step is granted one.
 const charges = () => tutorial.active
   ? Math.max(0, (toolStep() ? 1 : 0) - shiftsUsed)
@@ -1302,7 +1140,6 @@ function applyShift(r, c){
   }
   finishSlide();
   grid[r][c] <<= 1;
-  shifted[r][c] = true;   // and everything this tile goes on to become
   shiftsUsed++;
   armed = false;
   lastChanged = new Set([r + ',' + c]);   // reuse the merge pop for the promotion
@@ -1319,7 +1156,7 @@ function applyShift(r, c){
   }
   // A shift always clears bit 0, so it can never produce 255 on its own — but the
   // milestone check is cheap and keeps the win path in one place.
-  checkMilestones();
+  checkMilestones(0);
   saveGame();
 }
 
@@ -1328,11 +1165,9 @@ function renderStats(){
   document.getElementById('score').textContent = score;
   document.getElementById('moves').textContent = moves;
   document.getElementById('bestv').textContent = best;
-  // Neither gate nor endless has a target to display, so the slot tracks forged
-  // registers instead — in endless that doubles as progress toward the next discharge.
-  const goalless = mode !== 'xor';
-  document.getElementById('goalk').textContent = goalless ? 'Bytes' : 'Goal';
-  document.getElementById('goalv').textContent = goalless ? bytes : '11111111';
+  // Gate mode has no target to display, so the slot tracks forged bytes instead.
+  document.getElementById('goalk').textContent = mode === 'gate' ? 'Bytes' : 'Goal';
+  document.getElementById('goalv').textContent = mode === 'gate' ? bytes : '11111111';
 }
 
 function updateHighlight(){
@@ -1382,9 +1217,6 @@ function showOver(){
   document.getElementById('over-sub').textContent = win
     ? '255 — every bit set.'
     : 'Nothing on the board can move.' + (bytes ? ` ${bytes} byte${bytes>1?'s':''} forged.` : '');
-  // A won xor run can be carried into endless rather than thrown away. Offered, not
-  // pushed: it switches rule set, so New game stays the primary action and the focus.
-  document.getElementById('keep').hidden = !win;
   document.getElementById('over-score').textContent = score;
   document.getElementById('over-moves').textContent = moves;
   document.getElementById('over-best').textContent = best;
@@ -1399,26 +1231,6 @@ function hideOver(){
 }
 
 document.getElementById('again').addEventListener('click', () => { hideOver(); startNormalGame(); });
-
-/* Carry a won xor run into endless mode. The endless save is only overwritten when
-   nothing is at stake there — an endless run already in progress is resumed instead
-   of being destroyed, since silently discarding a long run is worse than the small
-   surprise of not carrying this board over. */
-document.getElementById('keep').addEventListener('click', () => {
-  let busy = false;
-  try {
-    const s = JSON.parse(store.get(keyFor('save', 'endless')) || 'null');
-    busy = !!(s && !s.over && (Number(s.moves) || 0) > 0);
-  } catch { /* unreadable save: treat as empty */ }
-  if(!busy){
-    store.set(keyFor('save', 'endless'), JSON.stringify({
-      grid, score, moves, won: false, over: false, bytes, shiftsUsed, shifted,
-    }));
-  }
-  hideOver();
-  setMode('endless');
-  if(busy) setMsg('An endless run was already going — picked that one up instead.', 'nudge');
-});
 // Dismissing only hides the panel — the run stays finished, and `over` keeps input off.
 document.getElementById('over-close').addEventListener('click', hideOver);
 overEl.addEventListener('click', e => { if(e.target.id === 'over') hideOver(); });
@@ -1566,15 +1378,13 @@ if('serviceWorker' in navigator && location.protocol === 'https:'){
 
 /* ---------- rule set switching ---------- */
 const LEGENDS = {
-  xor: 'Swipe or use <b>arrow keys / WASD</b>. When tiles meet, two <b>1</b>s cancel and a '
-     + '<b>1</b> with a <b>0</b> makes a <b>1</b>. Identical tiles vanish. Every 50 points earns a '
-     + '<b>&lt;&lt;</b> shift that slides a tile\'s 1s left. Fill the row: <b>11111111</b>.',
-  gate: 'Swipe or use <b>arrow keys / WASD</b>. Tiles join only if they never share a <b>1</b> in the '
-      + 'same slot; identical tiles <b>wipe out</b>; any clash <b>blocks</b>. Play for score — the '
-      + 'board fills up.',
-  endless: 'Swipe or use <b>arrow keys / WASD</b>. Same rules, but a full row of <b>1</b>s becomes a '
-      + '<b>wall</b>. Two walls destroy each other for <b>+' + DISCHARGE + '</b> — or <b>+'
-      + DISCHARGE_PURE + '</b> if neither needed a <b>&lt;&lt;</b> shift. No goal, no lose state.',
+  xor: 'Swipe or use <b>arrow keys / WASD</b>. Colliding tiles <b>merge</b>: two <b>1</b>s in the '
+     + 'same slot cancel, a <b>1</b> with a <b>0</b> makes a <b>1</b>. Equal tiles vanish to '
+     + '<b>0</b>. Every 50 points earns a <b>&lt;&lt;</b> shift that doubles a tile. Forge '
+     + '<b>11111111</b> (255).',
+  gate: 'Swipe or use <b>arrow keys / WASD</b>. Tiles merge only if they never share a <b>1</b> in '
+      + 'the same slot; equal tiles <b>annihilate</b>; any overlap <b>blocks</b>. Play for score — '
+      + 'the board fills up.',
 };
 const MODE_NOTES = {
   xor: 'Original rules. Every collision merges, so the board never holds more than nine tiles '
@@ -1583,26 +1393,21 @@ const MODE_NOTES = {
   gate: 'Prototype. Overlapping tiles block instead of merging, which fills the board and makes '
       + 'a lose state possible. Uses a flat spawn table. Progress and best score are tracked '
       + 'separately per rule set.',
-  endless: 'XOR rules with no finish line: the register is the currency rather than the goal. '
-      + 'Runs here score roughly ten times an ordinary one, which is why the best score is kept '
-      + 'separately — a shared one would bury the XOR result.',
 };
 
 function applyModeChrome(){
   document.getElementById('legend').innerHTML = LEGENDS[mode];
   document.getElementById('mode-note').textContent = MODE_NOTES[mode];
+  document.getElementById('rules-xor').hidden = mode !== 'xor';
+  document.getElementById('rules-gate').hidden = mode !== 'gate';
   for(const m of MODES){
-    document.getElementById('rules-' + m).hidden = m !== mode;
     document.getElementById('mode-' + m).setAttribute('aria-pressed', String(m === mode));
   }
-  document.title = mode === 'gate' ? 'BitForge 255 · Gate rules'
-                 : mode === 'endless' ? 'BitForge 255 · Endless'
-                 : 'BitForge 255';
+  document.title = mode === 'gate' ? 'BitForge 255 · Gate rules' : 'BitForge 255';
   const badge = document.getElementById('modebadge');
-  badge.hidden = mode === 'xor';
-  badge.textContent = mode === 'gate' ? 'GATE' : 'ENDLESS';
-  badge.title = 'You are playing the ' + badge.textContent.toLowerCase()
-              + ' rule set. Tap to switch back.';
+  badge.hidden = mode !== 'gate';
+  badge.textContent = 'GATE';
+  badge.title = 'You are playing the gate rule set. Tap to switch back.';
 }
 
 function bootMode(){
