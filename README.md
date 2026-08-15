@@ -30,6 +30,12 @@ have an identical leading pair; of those that collapse to two, none do.
 Cancelling and merging are deliberately kept distinguishable on screen, because the two
 outcomes are easy to confuse:
 
+- Colour states the outcome: a merge result flashes **green** as it appears, and a
+  doomed pair turns **red** the moment it starts travelling, so you see what will happen
+  on the way in rather than only at impact. The square a pair vacates flashes red too,
+  since the tiles themselves are gone by then. Motion carries the same information
+  independently — merges pop and stay, cancellations swell and implode — so the
+  red/green pair is never the only cue.
 - A cancelling pair visibly dissolves as it meets, rather than blinking out.
 - The tile each move spawns is kept off any square a pair just vacated. Without that,
   since 40% of spawns are a `1`, cancelling two `1`s would routinely drop a fresh `1`

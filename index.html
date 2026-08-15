@@ -20,6 +20,10 @@
   :root{
     --bg:#0b0e14; --panel:#121722; --cell:#1a2130; --text:#e6edf3;
     --accent:#3fb6ff; --gold:#ffd166; --dim:#8b98ab; --edge:#232b3d;
+    /* Outcome colours: green for a merge that produces something, red for a pair that
+       destroys itself. Motion still distinguishes them on its own — merges pop and
+       stay, cancellations shrink and go — so the pair is never the only cue. */
+    --good:#4ade80; --bad:#ff5f57;
     --gap:clamp(5px, 1.6vmin, 10px);
     /* Tile travel time. SLIDE_MS in the script mirrors this — it decides when the
        merged result replaces the two tiles that produced it. */
@@ -146,8 +150,25 @@
   .tile .dec{ font-size:clamp(13px, 30cqmin, 26px); font-weight:700; line-height:1; margin-top:2px; }
   .tile.dense{ color:#0b0e14; }
   @keyframes pop{ from{ scale:.6; opacity:0; } to{ scale:1; opacity:1; } }
-  @keyframes merge{ 0%{ scale:.82; } 60%{ scale:1.08; } 100%{ scale:1; } }
-  @keyframes annihilate{ from{ opacity:.95; scale:1; } to{ opacity:0; scale:.5; } }
+  @keyframes merge{
+    0%{   scale:.82; background:var(--good); }
+    45%{  scale:1.10; background:var(--good); }
+    100%{ scale:1; }
+  }
+  /* Red from the moment the pair is doomed, so the outcome is telegraphed on the way
+     in rather than only at the point of impact. */
+  @keyframes annihilate{
+    0%{   opacity:1; scale:1;   background:var(--bad); }
+    35%{  opacity:1; scale:1.1; background:var(--bad); }
+    100%{ opacity:0; scale:.35; background:var(--bad); }
+  }
+  /* The tiles are removed the instant the slide ends, so the square they died on
+     carries the red a little longer than they can. */
+  .cell.boom{ animation:boom .34s ease-out; }
+  @keyframes boom{
+    0%{   background:var(--bad); box-shadow:0 0 0 3px var(--bad), 0 0 22px rgba(255,95,87,.5); }
+    100%{ background:var(--cell); box-shadow:none; }
+  }
   /* Pre-2022 engines lack the independent transform properties; fall back to a
      static transform and no animation rather than piling every tile at 0,0. */
   @supports not (translate: 0px 0px){
@@ -155,11 +176,11 @@
       transform:translate(calc(var(--x) * (100% + var(--gap))), calc(var(--y) * (100% + var(--gap))));
       transition:none;
     }
-    .tile.spawned, .tile.merged, .tile.vanish{ animation:none; }
+    .tile.spawned, .tile.merged, .tile.vanish, .cell.boom{ animation:none; }
   }
   @media (prefers-reduced-motion:reduce){
     .tile{ transition:none; }
-    .tile.spawned, .tile.merged, .tile.vanish{ animation:none; }
+    .tile.spawned, .tile.merged, .tile.vanish, .cell.boom{ animation:none; }
     .cell{ transition:none; }
   }
 
@@ -871,6 +892,7 @@ function startSlide(anim, done){
   const to = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
   const dying = [];
   const moved = new Set();
+  const boom = new Set();   // squares where a pair cancelled to nothing
 
   for(const m of anim){
     const id = from[m.fromR][m.fromC];
@@ -878,7 +900,7 @@ function startSlide(anim, done){
     moved.add(id);
     const el = tileMap.get(id).el;
     place(el, m.toR, m.toC);
-    if(m.vanish) el.classList.add('vanish');
+    if(m.vanish){ el.classList.add('vanish'); boom.add(m.toR * SIZE + m.toC); }
     if(m.gone) dying.push(id);
     else to[m.toR][m.toC] = id;
   }
@@ -889,19 +911,32 @@ function startSlide(anim, done){
   }
 
   idGrid = to;
-  slide = { dying, done, timer: 0 };
+  slide = { dying, done, boom, timer: 0 };
   if(reduceMotion()) finishSlide();
   else slide.timer = setTimeout(finishSlide, SLIDE_MS);
 }
 
 function finishSlide(){
   if(!slide) return;
-  const { dying, done, timer } = slide;
+  const { dying, done, boom, timer } = slide;
   slide = null;
   clearTimeout(timer);
   for(const id of dying) dropTile(id);
+  // Only where the pair left nothing behind. If a following tile settled on the same
+  // square, ringing it in red would read as a mark against that tile.
+  for(const i of boom) if(grid[(i / SIZE) | 0][i % SIZE] === 0) flashCell(cells[i]);
   syncTiles();
   if(done) done();
+}
+
+// Re-adding the class alone would not restart the animation on a square that just
+// flashed, so the class is dropped and the reflow forced first.
+function flashCell(cell){
+  cell.classList.remove('boom');
+  void cell.offsetWidth;
+  cell.classList.add('boom');
+  clearTimeout(cell._boom);
+  cell._boom = setTimeout(() => cell.classList.remove('boom'), 340);
 }
 
 // Called before anything that replaces the board outright; unlike finishSlide it
