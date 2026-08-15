@@ -69,11 +69,19 @@ page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.
 const ok = [], bad = [];
 const check = (name, cond, extra = '') => (cond ? ok : bad).push(name + (extra ? ` — ${extra}` : ''));
 
+/* Several blocks below stub window.spawn to freeze the board. Stubbing overwrites the
+   global outright, so the real function is unreachable afterwards and any later block
+   that needs tiles to arrive gets an empty board and silently asserts nothing. That has
+   happened twice. The pristine function is stashed on every load, and any block that
+   needs real spawning restores from the stash rather than trusting what it inherits. */
+const stashSpawn = () => page.evaluate(() => { window.__realSpawn = window.spawn; });
+
 await page.goto(`http://localhost:${PORT}/index.html`);
 // Start as a returning player would, past the tutorial.
 await page.evaluate(() => localStorage.setItem('xor2048.tutorial.xor.v2', 'done'));
 await page.reload();
 await page.waitForTimeout(200);
+await stashSpawn();
 
 /* ---------- classic is untouched ---------- */
 let s = await page.evaluate(() => ({
@@ -185,6 +193,29 @@ const keys = await page.evaluate(() => {
     best:    !!localStorage.getItem('xor2048.best.orders.v1'),
   };
 });
+/* ---------- the spawn rate follows the mode ----------
+   Two tiles a move in orders, one in classic. Counted by occupancy rather than by
+   stubbing spawn, so it measures what actually lands on the board. */
+const rate = await page.evaluate(() => {
+  window.spawn = window.__realSpawn;
+  const settle = mode => {
+    setMode(mode); startRun();
+    const start = grid.flat().filter(v => v).length;
+    // One move, from a board with no adjacent pair to merge, so nothing is consumed.
+    grid = [[1,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+    const before = grid.flat().filter(v => v).length;
+    move('down');
+    return { start, before, after: grid.flat().filter(v => v).length };
+  };
+  const c = settle('classic'), o = settle('orders');
+  return { classic: c, orders: o };
+});
+check('classic starts with two tiles', rate.classic.start === 2, 'tiles ' + rate.classic.start);
+check('classic adds one tile a move', rate.classic.after - rate.classic.before === 1,
+  `${rate.classic.before} -> ${rate.classic.after}`);
+check('orders adds two tiles a move', rate.orders.after - rate.orders.before === 2,
+  `${rate.orders.before} -> ${rate.orders.after}`);
+
 /* ---------- the help screen tracks the mode ---------- */
 const help = await page.evaluate(() => {
   const read = () => ({
@@ -235,6 +266,7 @@ check('and lands back in orders', round.mode === 'orders');
 
 await page.reload();
 await page.waitForTimeout(200);
+await stashSpawn();
 const kept = await page.evaluate(() => ({ mode, pc: popcount(order) }));
 check('mode survives a reload', kept.mode === 'orders', kept.mode);
 check('restored order is valid', kept.pc >= 4 && kept.pc <= 8, 'popcount ' + kept.pc);
@@ -258,7 +290,6 @@ const many = await page.evaluate(() => {
   setMode('classic'); setMode('orders'); startRun();
   // Restored below. Leaving it stubbed silently empties the board for every later block,
   // which is exactly how the soak underneath it ran 2500 no-op moves and still passed.
-  const realSpawn = window.spawn;
   window.spawn = () => false;
   const before = filled;
   for (let i = 0; i < 10; i++) {
@@ -267,7 +298,7 @@ const many = await page.evaluate(() => {
     grid = [[a, T ^ a, 0, 0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
     move('left');
   }
-  window.spawn = realSpawn;
+  window.spawn = window.__realSpawn;
   return { before, filled, label: document.getElementById('goalk').textContent,
            pc: popcount(order), over, won };
 });
@@ -281,6 +312,7 @@ check('order still valid after ten fills', many.pc >= 4 && many.pc <= 8);
    policy than chance. This is here to catch a crash or a broken invariant over thousands
    of moves, so nothing it asserts depends on how well the random player does. */
 const run = await page.evaluate(() => {
+  window.spawn = window.__realSpawn;
   setMode('classic'); setMode('orders'); startRun();
   const dirs = ['left','up','right','down'];
   // Tiles must actually be arriving. If an earlier block left spawn stubbed, the board
