@@ -332,6 +332,7 @@
     <h1>Bit<span>Forge</span></h1>
     <div class="acts">
       <button id="install" hidden>Install</button>
+      <button id="mode">Orders</button>
       <button id="newgame">New</button>
       <button class="ghost" id="help">How to play</button>
     </div>
@@ -339,7 +340,7 @@
 
   <div class="bar">
     <div class="stat"><div class="k">Score</div><div class="v" id="score">0</div></div>
-    <div class="stat" id="best"><div class="k">Best</div><div class="v" id="bestv">0</div></div>
+    <div class="stat" id="best"><div class="k" id="bestk">Best</div><div class="v" id="bestv">0</div></div>
     <div class="stat" id="goal"><div class="k" id="goalk">Goal</div><div class="v" id="goalv">11111111</div></div>
     <div class="stat"><div class="k">Moves</div><div class="v" id="moves">0</div></div>
   </div>
@@ -400,6 +401,14 @@
         <li>Score = total bits set on merges. No lose state — it's a puzzle, take your time.</li>
       </ul>
 
+      <ul id="orders-help" hidden>
+        <li><b>Orders.</b> The bar shows a byte. Forge that byte.</li>
+        <li>The tile comes off the board, and another byte is asked for.</li>
+        <li>That goes on for as long as you want. There is no timer and no ending.</li>
+        <li>An order never asks for fewer than four bits, because a spawn would fill it for you.</li>
+        <li><b>Best</b> counts orders filled, not points. Each mode keeps its own board and its own best.</li>
+      </ul>
+
       <div class="row">
         <button class="ghost" id="replay">Replay tutorial</button>
         <button id="close">Got it</button>
@@ -422,7 +431,47 @@ const SAVE_KEY = 'xor2048.save.xor.v2';
 const BEST_KEY = 'xor2048.best.xor.v2';
 const TUT_KEY  = 'xor2048.tutorial.xor.v2';
 
+/* Orders keeps its own board and its own record under its own keys. A classic run
+   ends at 11111111 and scores a median 262; an orders run never ends at all, so a
+   shared best score would bury the classic one within a single sitting. Separate
+   saves also mean switching mode parks a run rather than throwing it away. */
+const ORDERS_SAVE_KEY = 'xor2048.save.orders.v1';
+const ORDERS_BEST_KEY = 'xor2048.best.orders.v1';
+const MODE_KEY        = 'xor2048.mode.v1';
+
 let grid, score, moves, won, over, best = 0;
+
+/* ---------- mode ----------
+   'classic' is the game as it was: forge 11111111 and the run ends.
+   'orders'  names a byte, takes it off the board when you forge it, and names
+             another one. There is no counter, so nothing ends the run but you.
+
+   Orders never asks for fewer than four bits. Every spawn is a single bit, so a
+   one-, two- or three-bit order is routinely filled by a spawn with no play
+   involved — measured at a p10 of three moves. Four is the floor that makes an
+   order something you build rather than something you are handed. */
+const ORDER_MIN_BITS = 4;
+const ORDER_MAX_BITS = 8;
+let mode = 'classic';
+let order = 0;      // the byte orders mode is asking for
+let filled = 0;     // orders filled in this run
+
+const ordersMode = () => mode === 'orders';
+/* The tutorial teaches the classic rules on hand-built boards. Orders must stay out
+   of it entirely: consuming a tile there would take a tile the lesson depends on, and
+   the bar would name an order the player has no way to work on yet. */
+const ordersLive = () => mode === 'orders' && !tutorial.active;
+const bin = v => v.toString(2).padStart(8, '0');
+
+function drawOrder(){
+  const bits = [0,1,2,3,4,5,6,7];
+  for(let i = bits.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [bits[i], bits[j]] = [bits[j], bits[i]];
+  }
+  const k = ORDER_MIN_BITS + Math.floor(Math.random() * (ORDER_MAX_BITS - ORDER_MIN_BITS + 1));
+  return bits.slice(0, k).reduce((a, b) => a | (1 << b), 0);
+}
 /* Shift charges are bought with score rather than waited for, which is the whole
    point: under XOR nothing carries, so bit 7 can otherwise only arrive as a
    literal 128 spawn (1.5% of spawns — a median 44-move wait). Earning the tool
@@ -441,12 +490,23 @@ const store = {
   del(k){ try { localStorage.removeItem(k); } catch { /* non-fatal */ } },
 };
 
+const saveKey = () => ordersMode() ? ORDERS_SAVE_KEY : SAVE_KEY;
+const bestKey = () => ordersMode() ? ORDERS_BEST_KEY : BEST_KEY;
+
+// Classic ranks a run by score. Orders ranks it by orders filled: with no counter
+// to end a run, score only records how long someone was willing to sit there, and
+// the repo's own rule is that this mode is counted in forges rather than points.
+function recordBest(){
+  const v = ordersMode() ? filled : score;
+  if(v > best){ best = v; store.set(bestKey(), String(best)); }
+}
+
 function saveGame(){
   if(tutorial.active) return;
-  store.set(SAVE_KEY, JSON.stringify({ grid, score, moves, won, over, shiftsUsed }));
+  store.set(saveKey(), JSON.stringify({ grid, score, moves, won, over, shiftsUsed, order, filled }));
 }
 function loadGame(){
-  const raw = store.get(SAVE_KEY);
+  const raw = store.get(saveKey());
   if(!raw) return false;
   try {
     const s = JSON.parse(raw);
@@ -464,6 +524,14 @@ function loadGame(){
       : Math.max(0, Number(s.shiftsUsed) || 0);
     won = !!s.won;
     over = !!s.over;
+    filled = Math.max(0, Number(s.filled) || 0);
+    // A saved order is trusted only if it is a byte this mode could have drawn.
+    // Anything else — a classic save, a hand-edited one — gets a fresh order
+    // rather than an unfillable one.
+    const k = popcount(Number(s.order));
+    order = (Number.isInteger(s.order) && k >= ORDER_MIN_BITS && k <= ORDER_MAX_BITS)
+      ? s.order
+      : drawOrder();
     return true;
   } catch { return false; }
 }
@@ -687,9 +755,14 @@ function move(dir){
   lastChanged = res.merged;
   score += res.gained;
   moves++;
-  if(score > best){ best = score; store.set(BEST_KEY, String(best)); }
   spawn(vanishedCells(res.anim));
   buzz(res.gained);
+  // Both of these run before renderStats so the bar shows the state this move
+  // produced. A filled order clears its tile from `grid` here; the slide below still
+  // carries it to its slot, and syncTiles drops it when the slide lands — so the
+  // order is seen being taken off the board rather than blinking out.
+  checkOrders();
+  recordBest();
   renderStats();
   startSlide(res.anim);
   checkMilestones();
@@ -715,8 +788,8 @@ function advanceTutorial(){
     tutorial.active = false;
     document.getElementById('prompt').hidden = true;
     store.set(TUT_KEY, 'done');
-    // startNormalGame() clears #msg, so set the completion text after it runs.
-    startNormalGame();
+    // startRun() clears #msg, so set the completion text after it runs.
+    startRun();
     setMsg('Tutorial complete! Now forge 255 for real. 🎯', 'win');
   } else {
     loadTutorialStep(tutorial.step);
@@ -747,12 +820,14 @@ function startTutorial(){
   render();
 }
 
-function startNormalGame(){
+function startRun(){
   cancelSlide();
   hideOver();
   armed = false; shiftsUsed = 0;
   grid = Array.from({length:SIZE}, () => Array(SIZE).fill(0));
   score = 0; moves = 0; won = false; over = false;
+  filled = 0;
+  order = ordersMode() ? drawOrder() : 0;
   lastChanged = new Set();
   tutorial.active = false;
   document.getElementById('prompt').hidden = true;
@@ -762,8 +837,67 @@ function startNormalGame(){
   saveGame();
 }
 
+/* Switching parks the run being left and picks up the other one where it stopped,
+   because each mode saves under its own key. Nothing is discarded. */
+function setMode(next){
+  if(next === mode) return;
+  saveGame();
+  cancelSlide();
+  clearTiles();
+  hideOver();
+  mode = next;
+  store.set(MODE_KEY, mode);
+  best = Number(store.get(bestKey())) || 0;
+  armed = false; shiftsUsed = 0;
+  lastChanged = new Set();
+  setMsg('');
+  if(loadGame()){
+    render();
+    if(over){
+      setMsg(`11111111 forged in ${moves} moves. Score ${score}.`, 'win');
+      showOver();
+    }
+  } else {
+    startRun();
+  }
+  renderChrome();
+}
+
+/* An order is filled the moment its byte exists anywhere on the board. The tile is
+   consumed and the next order is drawn straight away.
+
+   Consuming is deliberate, and it is the one thing that lets this mode exist at all:
+   it is what a cancelling pair already does, so no tile is ever stopped from merging.
+   A rule that worked by blocking a merge would read as the game being broken — that
+   is what killed gate.
+
+   The loop matters. A freshly drawn order can already be sitting on the board, and
+   the header must not name a byte that is in front of you.
+
+   This is called before renderStats, not after. The throwaway prototype had the
+   equivalent check running after it, and the bar showed the order you had just
+   filled for one more move. */
+function checkOrders(){
+  if(!ordersLive()) return false;
+  let any = false, last = 0;
+  for(;;){
+    let hit = false;
+    for(let r=0;r<SIZE && !hit;r++) for(let c=0;c<SIZE && !hit;c++){
+      if(grid[r][c] === order){ grid[r][c] = 0; hit = true; }
+    }
+    if(!hit) break;
+    filled++; last = order; order = drawOrder(); any = true;
+  }
+  if(!any) return false;
+  recordBest();
+  setMsg(`${bin(last)} forged — ${filled} filled. Next: ${bin(order)}.`, 'win');
+  return true;
+}
+
 function checkMilestones(){
-  if(won) return;
+  // Orders has no win state: 11111111 is just another byte it can ask for, and
+  // ending the run on it would end the mode the first time it came up.
+  if(ordersLive() || won) return;
   if(grid.flat().some(v => v === 255)){
     // Forging the register ends the run rather than continuing past it.
     won = true; over = true;
@@ -1003,9 +1137,13 @@ function applyShift(r, c){
   armed = false;
   lastChanged = new Set([r + ',' + c]);   // reuse the merge pop for the promotion
   updateHighlight();
+  // A shift can finish an order outright — doubling 01111111 is not how, but
+  // doubling a 4-bit tile into the byte being asked for is. Checked before the
+  // layer is synced so the consumed tile never draws.
+  const orderFilled = checkOrders();
   syncTiles();
   renderStats();
-  setMsg('');
+  if(!orderFilled) setMsg('');
   if(tutorial.active){
     const step = tutorialSteps()[tutorial.step];
     if(step.check(grid)){
@@ -1024,6 +1162,13 @@ function renderStats(){
   document.getElementById('score').textContent = score;
   document.getElementById('moves').textContent = moves;
   document.getElementById('bestv').textContent = best;
+  // Best counts orders here, not points. Left as "Best" it sits next to a four-figure
+  // score reading like a worse one, so it says what it counts.
+  document.getElementById('bestk').textContent = ordersLive() ? 'Most orders' : 'Best';
+  // The goal slot carries the order, and its label carries the count — which is the
+  // number that matters in this mode and would otherwise need a fifth stat.
+  document.getElementById('goalk').textContent = ordersLive() ? `Order ${filled + 1}` : 'Goal';
+  document.getElementById('goalv').textContent = ordersLive() ? bin(order) : '11111111';
 }
 
 function updateHighlight(){
@@ -1083,7 +1228,7 @@ function hideOver(){
   overEl.setAttribute('aria-hidden', 'true');
 }
 
-document.getElementById('again').addEventListener('click', () => { hideOver(); startNormalGame(); });
+document.getElementById('again').addEventListener('click', () => { hideOver(); startRun(); });
 // Dismissing only hides the panel — the run stays finished, and `over` keeps input off.
 document.getElementById('over-close').addEventListener('click', hideOver);
 overEl.addEventListener('click', e => { if(e.target.id === 'over') hideOver(); });
@@ -1176,10 +1321,10 @@ document.addEventListener('touchend', e => {
 }, {passive:true});
 document.addEventListener('touchcancel', () => { swiping = false; }, {passive:true});
 
-document.getElementById('newgame').addEventListener('click', startNormalGame);
+document.getElementById('newgame').addEventListener('click', startRun);
 document.getElementById('skip').addEventListener('click', () => {
   store.set(TUT_KEY, 'done');
-  startNormalGame();
+  startRun();
 });
 helpBtn.addEventListener('click', openModal);
 closeBtn.addEventListener('click', closeModal);
@@ -1229,11 +1374,30 @@ if('serviceWorker' in navigator && location.protocol === 'https:'){
 }
 
 /* ---------- chrome ---------- */
-const LEGEND =
+const RULES =
   'Swipe or use <b>arrow keys / WASD</b>. Colliding tiles <b>merge</b>: two <b>1</b>s in the '
 + 'same slot cancel, a <b>1</b> with a <b>0</b> makes a <b>1</b>. Equal tiles vanish to '
-+ '<b>0</b>. Every 50 points earns a <b>&lt;&lt;</b> shift that doubles a tile. Forge '
-+ '<b>11111111</b> (255).';
++ '<b>0</b>. Every 50 points earns a <b>&lt;&lt;</b> shift that doubles a tile. ';
+
+const LEGEND = {
+  classic: RULES + 'Forge <b>11111111</b> (255).',
+  orders:  RULES + 'Forge the byte shown under <b>Order</b>. It comes off the board and '
+         + 'another one is asked for. No timer, no ending — press <b>New</b> when you have had enough.',
+};
+
+const modeBtn = document.getElementById('mode');
+
+// The button is labelled with the mode it takes you to, not the one you are in.
+function renderChrome(){
+  modeBtn.textContent = ordersMode() ? 'Classic' : 'Orders';
+  modeBtn.title = ordersMode()
+    ? 'Back to forging 11111111. Your orders run is kept.'
+    : 'Forge one byte after another, for as long as you like. Your classic run is kept.';
+  document.getElementById('legend').innerHTML = LEGEND[mode];
+  document.getElementById('orders-help').hidden = !ordersMode();
+}
+
+modeBtn.addEventListener('click', () => setMode(ordersMode() ? 'classic' : 'orders'));
 
 function boot(){
   cancelSlide();
@@ -1241,8 +1405,9 @@ function boot(){
   clearTiles();
   lastChanged = new Set();   // no merge flash on a board we are only restoring
   armed = false; shiftsUsed = 0;
-  best = Number(store.get(BEST_KEY)) || 0;
-  document.getElementById('legend').innerHTML = LEGEND;
+  mode = store.get(MODE_KEY) === 'orders' ? 'orders' : 'classic';
+  best = Number(store.get(bestKey())) || 0;
+  renderChrome();
   if(loadGame()){
     render();
     if(over){
@@ -1250,7 +1415,7 @@ function boot(){
       showOver();
     }
   } else if(store.get(TUT_KEY) === 'done'){
-    startNormalGame();
+    startRun();
   } else {
     startTutorial();
   }
