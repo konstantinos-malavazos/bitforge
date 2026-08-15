@@ -1,4 +1,7 @@
-node_modules/
+# No trailing slash: a trailing slash matches directories only, and a symlinked
+# node_modules — which is how playwright often gets pointed at for tools/test-browser.mjs
+# — would slip straight past it and be committed as a link into somebody's scratch dir.
+node_modules
 dist/
 .DS_Store
 

@@ -24,6 +24,8 @@ Orders shipped. This is the first change to the game itself in three sessions.
 | `tools/simulate.mjs` | Two new commands, `hold` and `bank`. Now 513 lines. |
 | `sw.js` | `CACHE` bumped to `bitforge-v5`. |
 | `.gitignore` | `prototype/` ignored, so a throwaway can never reach the live site. |
+| `tools/test-browser.mjs` | 37 browser assertions over both modes. Needs playwright. |
+| `CONTEXT.md` | The word list, and how to write for this owner. `/wait-what` points here. |
 
 ## The mode, in one paragraph
 
@@ -140,10 +142,6 @@ puzzle. Nobody knows yet, because nobody has played it.
 2. **What Most orders should count.** Orders filled was chosen by reasoning, not by the
    user — they were asked and said *"not sure yet. lets discuss"*. Points is a one-line
    change if they prefer it.
-3. **`CONTEXT.md` does not exist.** `.claude/skills/wait-what/SKILL.md` tells the agent to
-   use "the ubiquitous language from `CONTEXT.md`", and there is no such file. The skill
-   built for the *"i didnt understand"* problem is running at half strength. Writing it is
-   a small job and was offered but not commissioned.
 
 ## How to talk to this user
 
@@ -159,8 +157,11 @@ not Ramp A and Ramp B. The playtesters do not follow the bit theory either:
 > At the end of the day the 1s nullify and 1-0 becomes 1. The xor and these stuff are just
 > flavour if someone wants to understand a bit more.
 
-`/wait-what` is installed for when it slips again. If a mechanic cannot be taught in one
-plain sentence, it is the wrong mechanic.
+**Read `CONTEXT.md` before writing anything for this owner.** It holds the word list — the
+word to use and the words not to use for the same thing — the terms to keep out entirely,
+and a worked example of the same explanation written badly and then well. `/wait-what`
+points at it. If a mechanic cannot be taught in one plain sentence, it is the wrong
+mechanic.
 
 Watch for unfilled placeholders. This session opened with a prompt containing a literal
 `<what felt good, what felt bad, what you would change>` — the feedback had not been
@@ -190,14 +191,20 @@ written. Ask rather than infer.
   (`./tools/build-itch.sh`).
 - **The repository root is the published site.** Anything committed there goes live. This
   is why `prototype/` is gitignored and why the orders throwaway was deleted twice.
-- **Browser testing:** `npm i playwright` in a scratchpad, launch with
-  `executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'`, serve the repo
-  from a small `node:http` server — **send `charset=utf-8`** or every em dash is mojibake.
-  Drive with `page.evaluate`; top-level declarations (`grid`, `score`, `move`, `applyMove`,
-  `charges`, `armShift`, `applyShift`, `mode`, `order`, `filled`, `setMode`, `startRun`,
-  `checkOrders`, `drawOrder`, `bin`, `popcount`) are reachable directly. Stub
-  `window.spawn = () => false` for rules assertions. Orders was verified this way over 31
-  assertions; that harness was **not committed** and will need rebuilding.
+- **Browser tests:** `npm i playwright` from the repo root (`node_modules/` is already
+  gitignored), then `node tools/test-browser.mjs`. 37 assertions covering both modes; it
+  serves the repo itself and finds Chromium under `/opt/pw-browsers`, or takes `CHROME`.
+  Run it after any change to `index.html`.
+  - Playwright is deliberately absent from any `package.json`. The game ships as one file
+    with no build step and no dependencies, and that is worth keeping.
+  - `NODE_PATH` does **not** work — ESM resolves by walking up from the importing file,
+    so the install has to sit above `tools/`.
+  - Writing more: drive with `page.evaluate`; top-level declarations (`grid`, `score`,
+    `move`, `applyMove`, `charges`, `armShift`, `applyShift`, `mode`, `order`, `filled`,
+    `setMode`, `startRun`, `checkOrders`, `drawOrder`, `bin`, `popcount`) are reachable
+    directly, and `drawOrder` can be reassigned to pin a random draw. Stub
+    `window.spawn = () => false` for rules assertions, and serve with **`charset=utf-8`**
+    or every em dash is mojibake.
 - **Storage keys.** Classic: `xor2048.save.xor.v2`, `xor2048.best.xor.v2`. Orders:
   `xor2048.save.orders.v1`, `xor2048.best.orders.v1`. Current mode: `xor2048.mode.v1`.
 - **PR flow:** open as draft; the user marks ready and merges quickly.
