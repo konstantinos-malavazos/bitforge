@@ -91,6 +91,8 @@ score, the move count and the best score, and offers a new game; *View board* di
 it to look at the final position, but the run stays finished and input stays off. A
 finished run reloads with its panel intact.
 
+That is the classic mode. Orders has no ending at all — see below.
+
 ## One rule set
 
 A `gate` prototype used to ship alongside the original rules: tiles combined only when
@@ -107,9 +109,43 @@ broken — and they were reported as exactly that in playtesting, before the rul
 even identified as the cause. **Merging and nullification are what this game is.** Any
 mechanic that suspends them for any tile is wrong here, however well it scores.
 
-That leaves one rule set, so the rules toggle, the per-mode storage keys, the flat spawn
-table, the jam detection and the second tutorial are all gone with it. Storage keys keep
-their original `.xor.` segment, so saves written by the two-mode build still load.
+That leaves one rule set, so the rules toggle, the flat spawn table, the jam detection
+and the second tutorial are all gone with it. Storage keys keep their original `.xor.`
+segment, so saves written by the two-mode build still load.
+
+Orders, below, brought the per-mode storage keys back. It did not bring back a second
+rule set: it changes what you are asked to forge, never how a tile behaves.
+
+## Orders
+
+A second mode, reached from the button in the top bar. The bar names a byte; you forge
+it; it comes off the board and another byte is named. That repeats for as long as you
+want to keep going.
+
+**There is no timer and no ending.** This is the mode's defining constraint and it was
+the owner's call — *"never timer"*. Every ending that was designed for it turned out to
+be a counter in a different coat: a deadline per order, a move budget, a queue of orders
+backing up. Without one, nothing stops a run but the player, so **Most orders** replaces
+**Best** and counts orders filled rather than points. Score with no ending only records
+how long somebody was willing to sit there.
+
+**A filled order is consumed, not blocked.** This is what makes the mode legal under the
+rule above. Taking a tile off the board is what a cancelling pair already does; no tile
+is ever stopped from merging. `11111111` is not a win here either — it is just another
+byte the mode can ask for, and ending the run on it would end the mode the first time it
+came up.
+
+**Orders never ask for fewer than four bits.** Every spawn is a single bit, so a one-,
+two- or three-bit order is routinely filled by a spawn with no play involved — a p10 of
+three moves. Four bits is the floor that makes an order something you build.
+
+Each mode keeps its own board and its own record under its own keys, so switching parks
+a run rather than throwing it away. A classic run ends at `11111111` and scores a median
+262; an orders run never ends at all, so a shared best score would bury the classic one
+within one sitting.
+
+**No difficulty ramp yet.** Every order is drawn the same way, so order 20 is no harder
+than order 2. Two ramps have been measured and neither is built — see *Balance notes*.
 
 ## Layout
 
@@ -281,6 +317,46 @@ Two alternatives were measured and rejected:
     dumps its whole charge stockpile chain-shifting to bit 7 scores within **1%** of one
     that does not, under every payout schedule and charge source tried. Charges are not
     the binding constraint: a long run banks ~70 and spends ~7.
+
+### Making a later order harder
+
+Orders ships without a ramp, so order 20 is drawn exactly like order 2. Bit count cannot
+supply one — an arbitrary target costs 52 moves at 4–5 bits, 56 at 6–7 and 51 for
+`11111111` itself, which is flat. Any ramp has to be authored. Three were measured with
+`node tools/simulate.mjs hold` and `node tools/simulate.mjs bank`.
+
+**Rejected — one order naming several bytes that must sit on the board together.**
+
+| bytes held at once | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| median moves | 59 | 1139 | — | — |
+| runs completing one | 100% | 65% | 1% | 0% |
+
+A cliff, not a ramp. The cause is a rule already in the game: every adjacent pair merges
+unconditionally, so a finished byte cannot be parked while the next is built — it gets
+eaten. Worth keeping as the sharpest measure of how fragile a forged tile is.
+
+**Ramp A — more bytes per order, forged one at a time and consumed as they land.**
+
+| bytes | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| median moves | 58 | 138 | 212 | 287 | 364 |
+
+Near-linear, so the order gets *longer* rather than harder. Four bytes is already a
+287-move slog; three looks like the practical cap.
+
+**Ramp B — the shift tool getting dearer with each order.**
+
+| `<<` cost | 25 | 50 | 100 | 200 | out of reach |
+|---|---|---|---|---|---|
+| median moves | 40 | 60 | 84 | 99 | 128 |
+
+A 3.2× span that asymptotes once nobody can afford the tool. The order gets *slower*,
+because the game takes the tool away.
+
+Both work and neither is a timer. Which one to build — or whether the mode is better
+without a ramp at all — is unsettled, and is a question about feel rather than one more
+simulation can answer.
 
 ## License
 
