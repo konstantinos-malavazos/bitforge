@@ -302,12 +302,12 @@
   #over .fig .v{ font-size:clamp(15px, 5vw, 21px); font-weight:700; line-height:1.3; }
   #over .fig.hi .v{ color:var(--gold); }
   #over .row{ justify-content:center; }
-  #over #again, #over #keep{ background:var(--accent); color:#08121c; border-color:var(--accent);
+  #over #again{ background:var(--accent); color:#08121c; border-color:var(--accent);
                 font-size:14px; padding:10px 22px; letter-spacing:1px; }
-  /* When the run can be carried into endless mode that becomes the headline action,
-     so New game steps back to a ghost — two accent buttons would compete. */
-  #over.carry #again{ background:transparent; color:var(--fg); border-color:var(--line);
-                font-weight:500; }
+  /* Carrying on stays a deliberate secondary choice. It changes rule set, and a player
+     who just hit the biggest button to start another game should not land somewhere
+     that blocks tiles xor would have merged. */
+  #over #keep{ font-size:12px; }
   #over #keep[hidden]{ display:none; }
 
   #modal{
@@ -336,12 +336,20 @@
   .card .note{ margin:0; font-size:12px; color:var(--dim); line-height:1.45; }
   #rules-xor[hidden], #rules-gate[hidden], #rules-endless[hidden]{ display:none; }
   #msg.over{ color:var(--gold); font-weight:700; }
+  #modebadge{ background:var(--gold); color:#08121c; border-color:var(--gold);
+              font-size:10px; letter-spacing:1.5px; font-weight:700; padding:5px 9px;
+              white-space:nowrap; }
+  #modebadge[hidden]{ display:none; }
 </style>
 </head>
 <body>
   <div class="topbar">
     <h1>Bit<span>Forge</span></h1>
     <div class="acts">
+      <!-- Only the non-default rule sets announce themselves. Both of them block
+           tiles that xor would have merged, which reads as the game being broken
+           if you do not know you switched. Tapping it opens the rules toggle. -->
+      <button id="modebadge" hidden></button>
       <button id="install" hidden>Install</button>
       <button id="newgame">New</button>
       <button class="ghost" id="help">How to play</button>
@@ -389,7 +397,7 @@
       <div class="row">
         <button class="ghost" id="over-close">View board</button>
         <button id="again">New game</button>
-        <button id="keep" hidden>Keep going</button>
+        <button class="ghost" id="keep" hidden>Try Endless rules →</button>
       </div>
     </div>
   </div>
@@ -1374,16 +1382,15 @@ function showOver(){
   document.getElementById('over-sub').textContent = win
     ? '255 — every bit set.'
     : 'Nothing on the board can move.' + (bytes ? ` ${bytes} byte${bytes>1?'s':''} forged.` : '');
-  // A won xor run can be carried into endless rather than thrown away. The forged
-  // register becomes the first wall, which is exactly where endless wants to start.
+  // A won xor run can be carried into endless rather than thrown away. Offered, not
+  // pushed: it switches rule set, so New game stays the primary action and the focus.
   document.getElementById('keep').hidden = !win;
-  overEl.classList.toggle('carry', win);
   document.getElementById('over-score').textContent = score;
   document.getElementById('over-moves').textContent = moves;
   document.getElementById('over-best').textContent = best;
   overEl.classList.add('open');
   overEl.setAttribute('aria-hidden', 'false');
-  document.getElementById(win ? 'keep' : 'again').focus();
+  document.getElementById('again').focus();
 }
 
 function hideOver(){
@@ -1510,6 +1517,7 @@ document.getElementById('skip').addEventListener('click', () => {
   startNormalGame();
 });
 helpBtn.addEventListener('click', openModal);
+document.getElementById('modebadge').addEventListener('click', openModal);
 closeBtn.addEventListener('click', closeModal);
 document.getElementById('replay').addEventListener('click', () => { closeModal(); startTutorial(); });
 modalEl.addEventListener('click', e => { if(e.target.id === 'modal') closeModal(); });
@@ -1590,6 +1598,11 @@ function applyModeChrome(){
   document.title = mode === 'gate' ? 'BitForge 255 · Gate rules'
                  : mode === 'endless' ? 'BitForge 255 · Endless'
                  : 'BitForge 255';
+  const badge = document.getElementById('modebadge');
+  badge.hidden = mode === 'xor';
+  badge.textContent = mode === 'gate' ? 'GATE' : 'ENDLESS';
+  badge.title = 'You are playing the ' + badge.textContent.toLowerCase()
+              + ' rule set. Tap to switch back.';
 }
 
 function bootMode(){
