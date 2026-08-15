@@ -46,8 +46,10 @@ outcomes are easy to confuse:
   same instant.
 
 Score is the number of set bits produced by merges. There is no lose state: each line
-collapses to at most two tiles per move, so the board can hold at most nine tiles and
-can never deadlock.
+collapses to at most two tiles per move, so the board can hold at most nine tiles of
+sixteen and can never deadlock. This is arithmetic rather than balance, and it is the
+constraint any future "keep playing" mode has to work around — the board cannot be made
+to fill.
 
 Controls: swipe, arrow keys, or WASD.
 
@@ -72,7 +74,6 @@ with score, so the tool is earned by playing well rather than waited for.
   register. The attempt is refused and costs nothing.
 - Does not consume a move and does not spawn a tile.
 - A shift always clears bit 0, so it can never produce `11111111` by itself.
-- XOR rules only. Gate mode spawns from a flat table and does not have the problem.
 
 Arm it with the `<<` button, then tap a tile — or use the arrow keys to move the gold
 cursor and Enter to confirm, so it works without a pointer. Escape cancels, and swiping
@@ -88,43 +89,27 @@ not accept a swipe, so the tool is met before it is needed.
 Forging `11111111` ends the game rather than continuing past it. A panel reports the
 score, the move count and the best score, and offers a new game; *View board* dismisses
 it to look at the final position, but the run stays finished and input stays off. A
-finished run reloads with its panel intact. Gate mode's jam uses the same panel, since
-both are terminal states and should not read differently.
+finished run reloads with its panel intact.
 
-## Rule sets
+## One rule set
 
-Two rule sets ship side by side. Pick one with the toggle in the How-to-play dialog, or
-with `?rules=xor` / `?rules=gate`. Saved games, best scores and tutorial progress are
-tracked separately per rule set, so switching never destroys the other's run.
+A `gate` prototype used to ship alongside the original rules: tiles combined only when
+they shared no bits, equal tiles annihilated, and any overlap **blocked**. The blocking
+was the point — it filled the board and made a lose state possible, which the original
+rules cannot have.
 
-**`xor`** (default) — the original. Every adjacent pair merges, unconditionally.
+It was removed, for the same reason an endless prototype was removed just before it:
 
-**`gate`** (prototype) — collisions have three outcomes:
+> the gate does not merge. it stacks so i think it is not good to be there
 
-| Collision | Rule | Role |
-|---|---|---|
-| No shared bits (`a & b == 0`) | combine → `a\|b`, score `popcount²` | the build move |
-| Equal tiles (`a == b`) | annihilate, score `popcount × 2` | the pressure valve |
-| Any shared bit | **block** | what fills the board |
+Tiles that refuse to merge do not read as a different game. They read as the game being
+broken — and they were reported as exactly that in playtesting, before the rule set was
+even identified as the cause. **Merging and nullification are what this game is.** Any
+mechanic that suspends them for any tile is wrong here, however well it scores.
 
-Blocking is the whole point: it is the only thing that lets the board fill, which is what
-makes a lose state possible. Two consequences fall out of the rules rather than being
-written in — a forged `11111111` overlaps every other tile, so it becomes a wall that only
-a second `11111111` can clear; and the game ends when no direction produces a legal move.
-Gate mode also uses a flat spawn table, because the skewed one starves high bits.
-
-Measured over 200 in-browser games under random play:
-
-| | `xor` | `gate` |
-|---|---|---|
-| Games that end | 0% | **100%** |
-| Median length | never | 81 moves |
-| Average occupancy | 3–4 / 16 | **10.1 / 16** |
-| Peak occupancy | 5 / 16 (bound: 9) | 16 / 16 |
-
-Under 1-ply greedy play in the offline simulator, `gate` scores 1408 median against 976
-for random — so direction choice is worth about 44%, where the original's outcome is
-mostly determined by the spawn sequence.
+That leaves one rule set, so the rules toggle, the per-mode storage keys, the flat spawn
+table, the jam detection and the second tutorial are all gone with it. Storage keys keep
+their original `.xor.` segment, so saves written by the two-mode build still load.
 
 ## Layout
 
